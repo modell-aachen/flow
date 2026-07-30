@@ -41,6 +41,10 @@
         "docker compose up --remove-orphans --wait",
         "mix speedrun"
       ],
+      "consistency": [
+        "docker compose up --remove-orphans --wait",
+        "mix consistency"
+      ],
       "docs": [
         "MIX_ENV=dev mix compile",
         "MIX_ENV=dev mix docs --formatter html"
