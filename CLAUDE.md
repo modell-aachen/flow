@@ -22,19 +22,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-All tooling runs inside devbox (direnv activates it on `cd`; `MIX_ENV=test` is the devbox default). `./run` boots the Postgres container and then runs any mix task:
+All tooling runs inside devbox (direnv activates it on `cd`; `MIX_ENV=test` and `LOG_LEVEL=warning` are devbox defaults). The init hook stays cheap — it only exports `MIX_HOME`, `HEX_HOME` and `ERL_AFLAGS` — and `devbox run setup` does the heavy work: hex, rebar, `mix deps.get`, `initdb` into `.devbox/virtenv/postgresql/data` (superuser `postgres`, trust auth, `max_connections=200`) and starting the `postgresql` plugin service on port 5544, waiting for `pg_isready`. It is idempotent, so re-run it whenever Postgres is not up; there is no Docker, and CI runs it as its own step before `devbox run ci`. Outside the direnv shell, prefix mix with `devbox run --`.
 
 ```bash
-./run test                                # full suite
-./run test lib/flow/store_test.exs        # one file
-./run test lib/flow/store_test.exs:35     # one test
-./run test.interactive                    # watch mode
-./run check                               # credo --strict, format --check-formatted, sobelow
-./run ci                                  # test --max-cases=8 + check (what CI runs)
+devbox run setup                          # mix tooling + Postgres, run this first
+mix test                                  # full suite
+mix test lib/flow/store_test.exs          # one file
+mix test lib/flow/store_test.exs:35       # one test
+mix test.interactive                      # watch mode
+mix check                                 # credo --strict, format --check-formatted, sobelow
+mix ci                                    # test --max-cases=8 + check (what CI runs)
 devbox run docs                           # ExDoc HTML into doc/
 devbox run speedrun                       # throughput harness against Postgres
 devbox run consistency                    # concurrent append/consistency checker
-devbox run test.stop                      # docker compose down
+devbox run test.stop                      # stop the Postgres service
 ```
 
 The `test` alias recreates and re-migrates the test repo first, and appends `--warnings-as-errors` — a compiler warning fails the suite.

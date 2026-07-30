@@ -186,6 +186,180 @@
     "github:NixOS/nixpkgs/nixpkgs-unstable": {
       "last_modified": "2026-07-01T15:14:03Z",
       "resolved": "github:NixOS/nixpkgs/e8273b29fe1390ec8d4603f2477357555291432e?lastModified=1782918843"
+    },
+    "glibcLocales@latest": {
+      "last_modified": "2026-07-23T05:10:05Z",
+      "resolved": "github:NixOS/nixpkgs/7525d999cd850b9a488817abc89c75dc733acf17#glibcLocales",
+      "source": "devbox-search",
+      "version": "2.42-67",
+      "systems": {
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/8zkbf0gj49l4kz5y0ffw0wikarlp8i7s-glibc-locales-2.42-67",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/8zkbf0gj49l4kz5y0ffw0wikarlp8i7s-glibc-locales-2.42-67"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/99jy9rzfzr9hf8lryisxn39nbc8xfw5d-glibc-locales-2.42-67",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/99jy9rzfzr9hf8lryisxn39nbc8xfw5d-glibc-locales-2.42-67"
+        }
+      }
+    },
+    "postgresql@18.4": {
+      "last_modified": "2026-07-23T13:11:22Z",
+      "plugin_version": "0.0.2",
+      "resolved": "github:NixOS/nixpkgs/6d12004108e0e4a5cfa4bd83b14477f040b15773#postgresql",
+      "source": "devbox-search",
+      "version": "18.4",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/d0pm6snj4mpbw1h4bz6869i2chps5ll6-postgresql-18.4",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/30mcl4q86047pqw2d9knnn1q1511x1p8-postgresql-18.4-man",
+              "default": true
+            },
+            {
+              "name": "plpython3",
+              "path": "/nix/store/bmgyaizzh14r1n1bhqn2cw4485a08gn6-postgresql-18.4-plpython3"
+            },
+            {
+              "name": "pltcl",
+              "path": "/nix/store/pnfjbs9mii5p62adamnxzapsgz11va5i-postgresql-18.4-pltcl"
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/pdayacsbk2r4qdq5dpik6sl449nlmlpc-postgresql-18.4-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/l1gq8acnjvjmgyyh4x3i70mgnh1b7zgx-postgresql-18.4-doc"
+            },
+            {
+              "name": "plperl",
+              "path": "/nix/store/w4jhn23lvcifbgfpihavhhdzl8g4ni97-postgresql-18.4-plperl"
+            },
+            {
+              "name": "jit",
+              "path": "/nix/store/5p85hwgs3cc7vsd1jdpb77q8n79p70r7-postgresql-18.4-jit"
+            },
+            {
+              "name": "lib",
+              "path": "/nix/store/k3kdhzjysadi387hm716dgjplmrydhch-postgresql-18.4-lib"
+            }
+          ],
+          "store_path": "/nix/store/d0pm6snj4mpbw1h4bz6869i2chps5ll6-postgresql-18.4"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/qj0xf43890fn6bf5rgcc6x10xg14inms-postgresql-18.4",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/wn18iaa1h6zgk2vzw31d84gavv335ida-postgresql-18.4-man",
+              "default": true
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/8yy5ky0994sbcnc1dgymssl7pl57g14b-postgresql-18.4-doc"
+            },
+            {
+              "name": "jit",
+              "path": "/nix/store/drfjpi475l2cyvnqx4lz5g2fy3xbm38z-postgresql-18.4-jit"
+            },
+            {
+              "name": "plperl",
+              "path": "/nix/store/i6z9krdz9xn19z5ixk4hmqsyjfr4xj2l-postgresql-18.4-plperl"
+            },
+            {
+              "name": "pltcl",
+              "path": "/nix/store/7lwxwn54x39flwbfaras0ay00xi75lj0-postgresql-18.4-pltcl"
+            },
+            {
+              "name": "lib",
+              "path": "/nix/store/ky95pylaprykfd3w9dfr5kjiw13fnm4h-postgresql-18.4-lib"
+            },
+            {
+              "name": "plpython3",
+              "path": "/nix/store/5wnkgqvl8i125f25sm2fsxk4dk1wy5wq-postgresql-18.4-plpython3"
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/gr04890vv556qy5vn8zvr4ycd0zi2vl0-postgresql-18.4-debug"
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/si44flzvdimg34alxxh2cwfjdrqi25cy-postgresql-18.4-dev"
+            }
+          ],
+          "store_path": "/nix/store/qj0xf43890fn6bf5rgcc6x10xg14inms-postgresql-18.4"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/8qlh3rmpgb1pmx54kr7m8l476gy8q3cr-postgresql-18.4",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/dqa804vp858p4in6xl9p5qlkf83j8y41-postgresql-18.4-man",
+              "default": true
+            },
+            {
+              "name": "jit",
+              "path": "/nix/store/qpw22h5cicllcpgqp6ahz4j0rpw76jaq-postgresql-18.4-jit"
+            },
+            {
+              "name": "lib",
+              "path": "/nix/store/qc0wf4xh4bx23rp038nq2fy8rsq6iwgi-postgresql-18.4-lib"
+            },
+            {
+              "name": "plperl",
+              "path": "/nix/store/asl2kcafab2z5pas2y4lqfi5pc6i1z03-postgresql-18.4-plperl"
+            },
+            {
+              "name": "pltcl",
+              "path": "/nix/store/qid0n2iih68vq67wm4gjfja2fqq1r852-postgresql-18.4-pltcl"
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/li3g82kmkrj7z8l25s9sx91nr2w1l1x8-postgresql-18.4-debug"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/ks0vfbqd3mdg1abzbq7pfijd4ac6d6f2-postgresql-18.4-doc"
+            },
+            {
+              "name": "plpython3",
+              "path": "/nix/store/2873fd8138j53gcvv5wi5cb6r7q5w0r1-postgresql-18.4-plpython3"
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/i09i5z3d9b3bi5sabrkj2yh1nzwh8z0w-postgresql-18.4-dev"
+            }
+          ],
+          "store_path": "/nix/store/8qlh3rmpgb1pmx54kr7m8l476gy8q3cr-postgresql-18.4"
+        }
+      }
     }
   }
 }

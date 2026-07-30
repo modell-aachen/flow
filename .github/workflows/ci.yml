@@ -31,4 +31,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-
 
+      - run: devbox run setup
+
       - run: devbox run ci
