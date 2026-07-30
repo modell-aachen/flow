@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.6/.schema/devbox.schema.json",
+  "packages": [
+    "beamMinimal29Packages.elixir_1_20@1.20.2",
+    "dexter@0.7.1",
+    "beamMinimal29Packages.erlang@29.0.3",
+    "beamMinimal29Packages.expert@0.1.6"
+  ],
+  "env": {
+    "MIX_ENV":                             "test",
+    "MIX_OS_DEPS_COMPILE_PARTITION_COUNT": "5",
+    "LOG_LEVEL":                           "warning"
+  },
+  "shell": {
+    "init_hook": [
+      "mkdir -p .nix-mix",
+      "mkdir -p .nix-hex",
+      "export MIX_HOME=$PWD/.nix-mix",
+      "export HEX_HOME=$PWD/.nix-hex",
+      "export ERL_AFLAGS='-kernel shell_history enabled'",
+      "mix local.hex --force",
+      "mix local.rebar --force",
+      "mix deps.get"
+    ],
+    "scripts": {
+      "ci": [
+        "docker compose up --remove-orphans --wait",
+        "mix ci"
+      ],
+      "dagger-ci": [
+        "mix ci"
+      ],
+      "check": [
+        "mix check"
+      ],
+      "test": [
+        "docker compose up --remove-orphans --wait",
+        "mix test.interactive --max-cases 8 $@"
+      ],
+      "speedrun": [
+        "docker compose up --remove-orphans --wait",
+        "mix speedrun"
+      ],
+      "docs": [
+        "MIX_ENV=dev mix compile",
+        "MIX_ENV=dev mix docs --formatter html"
+      ],
+      "test.stop": [
+        "docker compose down"
+      ]
+    }
+  }
+}

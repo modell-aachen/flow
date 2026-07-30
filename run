@@ -1,0 +1,16 @@
+#!/bin/bash
+
+set -e
+
+pushd "$(dirname "$0")"
+
+MIX_ENV="${MIX_ENV:-test}"
+LOG_LEVEL="${LOG_LEVEL:-warning}"
+
+docker compose up -d --remove-orphans --wait
+MIX_ENV=$MIX_ENV LOG_LEVEL=$LOG_LEVEL mix $@
+code=$?
+
+popd
+
+exit $code

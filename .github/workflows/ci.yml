@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+
+    env:
+      MIX_ENV: test
+      LOG_LEVEL: warning
+      POSTGRESQL_HOST: localhost
+      POSTGRESQL_PORT: 5432
+      POSTGRESQL_USER: postgres
+      POSTGRESQL_PASSWORD: postgres
+
+    services:
+      db:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      # Kept in sync with devbox.json, which pins the local toolchain.
+      - uses: erlef/setup-beam@0f75c29430f34bb5af4cce5e3b7f6a8860fca236 # v1
+        with:
+          otp-version: "29.0.3"
+          elixir-version: "1.20.2-otp-29"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ env.MIX_ENV }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ env.MIX_ENV }}-
+
+      - run: mix deps.get
+
+      - run: mix ci

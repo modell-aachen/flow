@@ -1,0 +1,191 @@
+{
+  "lockfile_version": "1",
+  "packages": {
+    "beamMinimal29Packages.elixir_1_20@1.20.2": {
+      "last_modified": "2026-07-03T16:41:56Z",
+      "resolved": "github:NixOS/nixpkgs/0c190cd98e1f30cdbeff0ca149b2b17564a4a30e#beamMinimal29Packages.elixir_1_20",
+      "source": "devbox-search",
+      "version": "1.20.2",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/vcwrri7dfyl2gnslg0y3dq0czlpi59ci-elixir-1.20.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/vcwrri7dfyl2gnslg0y3dq0czlpi59ci-elixir-1.20.2"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/ggnp247fs6cscvnqnnksj6snaw8dwyx0-elixir-1.20.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/ggnp247fs6cscvnqnnksj6snaw8dwyx0-elixir-1.20.2"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/j8r8r2j8140z25q07ljgpb77fix9jalg-elixir-1.20.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/j8r8r2j8140z25q07ljgpb77fix9jalg-elixir-1.20.2"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/1d2z5sc8l446kpafkmsq4q97382hrgib-elixir-1.20.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/1d2z5sc8l446kpafkmsq4q97382hrgib-elixir-1.20.2"
+        }
+      }
+    },
+    "beamMinimal29Packages.erlang@29.0.3": {
+      "last_modified": "2026-07-03T16:41:56Z",
+      "resolved": "github:NixOS/nixpkgs/0c190cd98e1f30cdbeff0ca149b2b17564a4a30e#beamMinimal29Packages.erlang",
+      "source": "devbox-search",
+      "version": "29.0.3",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/gx3ks5lc1108fgli2707snnj53vmy99v-erlang-29.0.3",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/gx3ks5lc1108fgli2707snnj53vmy99v-erlang-29.0.3"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/k4srmcva6n2lnpsxd8ryqjzfrc7rcykm-erlang-29.0.3",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/k4srmcva6n2lnpsxd8ryqjzfrc7rcykm-erlang-29.0.3"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/gjxhjkjnhvqd87iy8p4j73jd0axakv78-erlang-29.0.3",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/gjxhjkjnhvqd87iy8p4j73jd0axakv78-erlang-29.0.3"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/49yqxjblqlm3wancaizsalsh9nirmca6-erlang-29.0.3",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/49yqxjblqlm3wancaizsalsh9nirmca6-erlang-29.0.3"
+        }
+      }
+    },
+    "beamMinimal29Packages.expert@0.1.6": {
+      "last_modified": "2026-07-16T04:38:10Z",
+      "resolved": "github:NixOS/nixpkgs/6368bc923cec55a5f78960ade0cb4dd99580e087#beamMinimal29Packages.expert",
+      "source": "devbox-search",
+      "version": "0.1.6",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/im8qfzpax500lksb2dn29wk92mg7ka1v-expert-0.1.6",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/im8qfzpax500lksb2dn29wk92mg7ka1v-expert-0.1.6"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/b91ads9y7ifwrdkxqrbwxdyn1zrwxx8p-expert-0.1.6",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/b91ads9y7ifwrdkxqrbwxdyn1zrwxx8p-expert-0.1.6"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/k79n2qfdwa076z6m96avs0j28mg16jg8-expert-0.1.6",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/k79n2qfdwa076z6m96avs0j28mg16jg8-expert-0.1.6"
+        }
+      }
+    },
+    "dexter@0.7.1": {
+      "last_modified": "2026-06-27T07:37:20Z",
+      "resolved": "github:NixOS/nixpkgs/3d46470bb3030020f7e1361f33514854f5bfa86d#dexter",
+      "source": "devbox-search",
+      "version": "0.7.1",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/fvgxs3nhfym3lj4qi4yvbk826ygjzqkk-dexter-0.7.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/fvgxs3nhfym3lj4qi4yvbk826ygjzqkk-dexter-0.7.1"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/m8dd6hc52vgfrnnqbs44zwlqswyy25js-dexter-0.7.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/m8dd6hc52vgfrnnqbs44zwlqswyy25js-dexter-0.7.1"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/k4qhry0c681zw2xfix216911skgk129s-dexter-0.7.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/k4qhry0c681zw2xfix216911skgk129s-dexter-0.7.1"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/jr8b2gsm7jr90h1h21cmaxx0cvi7hnxv-dexter-0.7.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/jr8b2gsm7jr90h1h21cmaxx0cvi7hnxv-dexter-0.7.1"
+        }
+      }
+    },
+    "github:NixOS/nixpkgs/nixpkgs-unstable": {
+      "last_modified": "2026-07-01T15:14:03Z",
+      "resolved": "github:NixOS/nixpkgs/e8273b29fe1390ec8d4603f2477357555291432e?lastModified=1782918843"
+    }
+  }
+}
