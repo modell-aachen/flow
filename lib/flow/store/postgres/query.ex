@@ -177,11 +177,6 @@ defmodule Ariadne.Flow.Store.Postgres.Query do
   end
 
   @doc false
-  # Postgres advisory locks share one key space, so every lock purpose, schema
-  # prefix, context and reactor name has to map to its own key. The parts are
-  # length-prefixed, so no two different part lists encode the same bytes, and
-  # SHA-256 is truncated to a signed 64-bit integer to use the whole bigint
-  # range Postgres accepts.
   def advisory_lock_key(parts) when is_list(parts) do
     <<key::signed-integer-size(64), _rest::binary>> =
       :crypto.hash(:sha256, Enum.map_join(parts, &"#{byte_size(&1)}:#{&1}"))

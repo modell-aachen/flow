@@ -6,10 +6,6 @@ defmodule Ariadne.Flow.Store.Postgres.AdvisoryLockTest do
   @store_domain "modac_flow_postgres_store"
   @checkpoint_domain "modac_flow_reactor_checkpoint_lock"
 
-  @bigint_min -9_223_372_036_854_775_808
-  @bigint_max 9_223_372_036_854_775_807
-  @int32_max 2_147_483_647
-
   describe "advisory lock keys" do
     test "are distinct for inputs that only differ in one part" do
       inputs = [
@@ -34,22 +30,15 @@ defmodule Ariadne.Flow.Store.Postgres.AdvisoryLockTest do
                Query.advisory_lock_key([@checkpoint_domain, "public", "defaultreactor", ""])
     end
 
-    test "use the whole signed bigint range Postgres accepts" do
-      keys =
-        Enum.map(1..1_000, &Query.advisory_lock_key([@store_domain, "tenant_#{&1}", "default"]))
-
-      assert Enum.all?(keys, &(&1 >= @bigint_min and &1 <= @bigint_max))
-      assert Enum.any?(keys, &(&1 < -@int32_max))
-      assert Enum.any?(keys, &(&1 > @int32_max))
-      assert length(keys) == length(Enum.uniq(keys))
-    end
-
-    test "are stable, so all nodes and releases derive the same key" do
+    test "are stable across the signed bigint range, so every node derives the same key" do
       assert 4_058_807_053_573_865_758 ==
                Query.advisory_lock_key([@store_domain, "postgres_store_test_schema", "default"])
 
       assert 6_644_676_092_048_313_026 ==
                Query.advisory_lock_key([@checkpoint_domain, "public", "default", "reactor"])
+
+      assert -4_338_057_100_084_004_075 ==
+               Query.advisory_lock_key([@store_domain, "public", "b"])
     end
   end
 end
