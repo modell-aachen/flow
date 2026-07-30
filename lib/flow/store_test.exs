@@ -670,17 +670,10 @@ defmodule Ariadne.Flow.StoreTest do
       assert Store.read(reloaded) == Store.read(store)
     end
 
-    test "dump the module name under the pre-rename Modac.Flow namespace", %{store: store} do
+    test "dump the backend module name", %{store: store} do
       %{"module" => module} = Store.dump(store)
 
-      assert module == "Elixir.Modac.Flow.Store." <> module_suffix(store)
-    end
-
-    test "load a dump that names the module under either namespace", %{store: store} do
-      dump = Store.dump(store)
-      renamed = Map.update!(dump, "module", &String.replace(&1, "Modac.Flow.", "Ariadne.Flow."))
-
-      assert Store.load(renamed) == Store.load(dump)
+      assert module == "Elixir.Ariadne.Flow.Store." <> module_suffix(store)
     end
   end
 
