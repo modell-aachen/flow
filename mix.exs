@@ -30,7 +30,7 @@ defmodule Flow.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger]]
+    [extra_applications: [:crypto, :logger]]
   end
 
   defp deps do
@@ -54,11 +54,8 @@ defmodule Flow.MixProject do
         "ecto.migrate -r Ariadne.Flow.Test.Repo",
         "test --warnings-as-errors"
       ],
-      speedrun: [
-        "ecto.create -r Ariadne.Flow.Store.Speedrun.Repo --quiet",
-        "ecto.migrate -r Ariadne.Flow.Store.Speedrun.Repo",
-        "run lib/flow/store/speedrun_cli.exs"
-      ],
+      speedrun: speedrun_repo_setup() ++ ["run lib/flow/store/speedrun_cli.exs"],
+      consistency: speedrun_repo_setup() ++ ["run lib/flow/store/postgres/consistency_run.exs"],
       check: [
         "credo --strict",
         "format --check-formatted",
@@ -68,6 +65,13 @@ defmodule Flow.MixProject do
         "test --max-cases=8",
         "check"
       ]
+    ]
+  end
+
+  defp speedrun_repo_setup do
+    [
+      "ecto.create -r Ariadne.Flow.Store.Speedrun.Repo --quiet",
+      "ecto.migrate -r Ariadne.Flow.Store.Speedrun.Repo"
     ]
   end
 end

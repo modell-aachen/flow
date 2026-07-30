@@ -6,6 +6,10 @@ defmodule Ariadne.Flow.Store.Postgres.Query do
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @enforce_keys [:repo, :prefix, :context]
+
+  @store_lock_domain "modac_flow_postgres_store"
+  @checkpoint_lock_domain "modac_flow_reactor_checkpoint_lock"
+
   defstruct @enforce_keys
 
   defmodule EctoEvent do
@@ -100,7 +104,7 @@ defmodule Ariadne.Flow.Store.Postgres.Query do
 
     {:ok, result} =
       repo.transaction(fn ->
-        repo.query!(build_lock_query(prefix, context))
+        lock_store!(repo, prefix, context)
 
         if append_condition_passed?(q, append_condition, opts) do
           serialized_events = Enum.map(events, &map_to_ecto(q, &1, opts))
@@ -146,7 +150,7 @@ defmodule Ariadne.Flow.Store.Postgres.Query do
       when is_integer(batch_size) and batch_size > 0 do
     {:ok, result} =
       repo.transaction(fn ->
-        repo.query!(build_checkpoint_lock_query(q.prefix, q.context, name))
+        lock_checkpoint!(repo, q.prefix, q.context, name)
 
         prior_position = read_checkpoint_position(q, name, start_after_position)
 
@@ -170,6 +174,14 @@ defmodule Ariadne.Flow.Store.Postgres.Query do
       {:ok, result} -> result
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  @doc false
+  def advisory_lock_key(parts) when is_list(parts) do
+    <<key::signed-integer-size(64), _rest::binary>> =
+      :crypto.hash(:sha256, Enum.map_join(parts, &"#{byte_size(&1)}:#{&1}"))
+
+    key
   end
 
   defp build_result(batch, prior_position, more_in_store?, handler) do
@@ -284,14 +296,14 @@ defmodule Ariadne.Flow.Store.Postgres.Query do
     end)
   end
 
-  defp build_lock_query(prefix, context) do
-    hash = :erlang.phash2("modac_flow_postgres_store" <> prefix <> context)
-    "SELECT pg_advisory_xact_lock(#{hash})"
-  end
+  defp lock_store!(repo, prefix, context),
+    do: acquire_advisory_lock!(repo, [@store_lock_domain, prefix, context])
 
-  defp build_checkpoint_lock_query(prefix, context, name) do
-    hash = :erlang.phash2("modac_flow_reactor_checkpoint_lock" <> prefix <> context <> name)
-    "SELECT pg_advisory_xact_lock(#{hash})"
+  defp lock_checkpoint!(repo, prefix, context, name),
+    do: acquire_advisory_lock!(repo, [@checkpoint_lock_domain, prefix, context, name])
+
+  defp acquire_advisory_lock!(repo, parts) do
+    repo.query!("SELECT pg_advisory_xact_lock($1)", [advisory_lock_key(parts)])
   end
 
   defp append_condition_passed?(_, nil, _), do: true
