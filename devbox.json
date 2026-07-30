@@ -4,12 +4,16 @@
     "beamMinimal29Packages.elixir_1_20@1.20.2",
     "dexter@0.7.1",
     "beamMinimal29Packages.erlang@29.0.3",
-    "beamMinimal29Packages.expert@0.1.6"
+    "beamMinimal29Packages.expert@0.1.6",
+    "postgresql@18.4"
   ],
   "env": {
     "MIX_ENV":                             "test",
     "MIX_OS_DEPS_COMPILE_PARTITION_COUNT": "5",
-    "LOG_LEVEL":                           "warning"
+    "LOG_LEVEL":                           "warning",
+    "PGPORT":                              "5544",
+    "PGUSER":                              "postgres",
+    "PGDATABASE":                          "postgres"
   },
   "shell": {
     "init_hook": [
@@ -17,32 +21,30 @@
       "mkdir -p .nix-hex",
       "export MIX_HOME=$PWD/.nix-mix",
       "export HEX_HOME=$PWD/.nix-hex",
-      "export ERL_AFLAGS='-kernel shell_history enabled'",
-      "mix local.hex --force",
-      "mix local.rebar --force",
-      "mix deps.get"
+      "export ERL_AFLAGS='-kernel shell_history enabled'"
     ],
     "scripts": {
-      "ci": [
-        "docker compose up --remove-orphans --wait",
-        "mix ci"
+      "setup": [
+        "mix local.hex --force",
+        "mix local.rebar --force",
+        "mix deps.get",
+        "[ -f \"$PGDATA/PG_VERSION\" ] || initdb --username=$PGUSER --auth=trust --locale=C --encoding=UTF8 --set max_connections=200",
+        "pg_isready --quiet || devbox services start postgresql",
+        "timeout 30 bash -c 'until pg_isready --quiet; do sleep 0.5; done' || pg_isready"
       ],
-      "dagger-ci": [
+      "ci": [
         "mix ci"
       ],
       "check": [
         "mix check"
       ],
       "test": [
-        "docker compose up --remove-orphans --wait",
         "mix test.interactive --max-cases 8 $@"
       ],
       "speedrun": [
-        "docker compose up --remove-orphans --wait",
         "mix speedrun"
       ],
       "consistency": [
-        "docker compose up --remove-orphans --wait",
         "mix consistency"
       ],
       "docs": [
@@ -50,7 +52,7 @@
         "MIX_ENV=dev mix docs --formatter html"
       ],
       "test.stop": [
-        "docker compose down"
+        "devbox services stop postgresql"
       ]
     }
   }

@@ -13,14 +13,21 @@ application, the store, encoders and testing.
 
 ## Local Development
 
-When developing locally you can use the run script to execute tests and all
-other mix tasks:
+`devbox run setup` installs the mix tooling and starts Postgres. Run it after
+cloning and whenever Postgres is not up — it is idempotent. Everything else
+runs as a plain mix task inside the devbox shell, which direnv activates on
+`cd`:
 
 ```bash
-./run test.interactive # Run tests interactively in watch mode
-./run ci # Run all tests and checks which are also performed in CI
+devbox run setup # Install the mix tooling and start Postgres
+mix test.interactive # Run tests interactively in watch mode
+mix ci # Run all tests and checks which are also performed in CI
 devbox run docs # Build the HTML docs into doc/
+devbox run test.stop # Stop the Postgres service
 ```
+
+No Docker is involved: the cluster is created by the setup script and lives in
+`.devbox/virtenv/postgresql/data`.
 
 The test database listens on port 5544, so it does not collide with other
 local Postgres instances.
