@@ -42,33 +42,15 @@ defmodule Ariadne.Flow.Store do
     module.transaction(config, fun)
   end
 
-  # The dumped module name is a wire format: it sits in persisted Oban args and feeds
-  # Oban's unique and partition keys, so it keeps the pre-rename Modac.Flow spelling to
-  # stay readable by nodes that still run the old release. Drop the translation once no
-  # pre-rename node and no pre-rename job can exist.
-  @wire_namespace "Elixir.Modac.Flow."
-  @namespace "Elixir.Ariadne.Flow."
-
   def dump(%__MODULE__{module: module, config: config}) do
-    %{"module" => to_wire_name(module), "config" => module.dump(config)}
+    %{"module" => Atom.to_string(module), "config" => module.dump(config)}
   end
 
   def load(%{"module" => module, "config" => config}) do
-    module =
-      module
-      |> from_wire_name()
-      |> String.to_existing_atom()
+    module = String.to_existing_atom(module)
 
     %__MODULE__{module: module, config: module.load(config)}
   end
-
-  defp to_wire_name(module) do
-    module
-    |> Atom.to_string()
-    |> String.replace_prefix(@namespace, @wire_namespace)
-  end
-
-  defp from_wire_name(module), do: String.replace_prefix(module, @wire_namespace, @namespace)
 
   def append(%__MODULE__{module: module, config: config}, events, opts \\ []) do
     opts = validate_append_condition(opts)
