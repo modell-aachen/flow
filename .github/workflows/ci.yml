@@ -16,8 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      # Toolchain and env come from devbox.json/devbox.lock, so there is
-      # nothing to keep in sync here.
       - uses: jetify-com/devbox-install-action@8c6a66ed6273138b1915457069de78cb52fe3bd7 # v0.15.0
         with:
           enable-cache: "true"
@@ -33,6 +31,4 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-
 
-      # Starts the docker-compose database and runs `mix ci`, exactly like
-      # `devbox run ci` does locally.
       - run: devbox run ci
