@@ -32,6 +32,23 @@ No Docker is involved: the cluster is created by the setup script and lives in
 The test database listens on port 5544, so it does not collide with other
 local Postgres instances.
 
+## Releases
+
+release-please owns the version and the changelog. The `commit-msg` hook in
+`.githooks/` rejects subjects that are not
+[Conventional Commits](https://www.conventionalcommits.org):
+
+```
+feat(store): read events by tag
+fix: derive advisory lock keys from SHA-256
+feat!: drop the Modac.Flow wire-format shim
+```
+
+Every push to `main` refreshes a release pull request that bumps `version:` in
+`mix.exs` and writes `CHANGELOG.md`. Merging it tags `vX.Y.Z` and publishes a
+GitHub release. While the library is pre-1.0, `feat`/`fix` bump the patch and
+`!` bumps the minor, so a breaking change goes to 0.2.0 rather than 1.0.0.
+
 ## Dependency Selection
 
 Especially in Elixir do not use/introduce copyleft licenses, e.g. GPL, AGPL, etc.

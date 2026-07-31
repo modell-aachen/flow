@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-All tooling runs inside devbox (direnv activates it on `cd`; `MIX_ENV=test` and `LOG_LEVEL=warning` are devbox defaults). The init hook stays cheap — it only exports `MIX_HOME`, `HEX_HOME` and `ERL_AFLAGS` — and `devbox run setup` does the heavy work: hex, rebar, `mix deps.get`, `initdb` into `.devbox/virtenv/postgresql/data` (superuser `postgres`, trust auth, `max_connections=200`) and starting the `postgresql` plugin service on port 5544, waiting for `pg_isready`. It is idempotent, so re-run it whenever Postgres is not up; there is no Docker, and CI runs it as its own step before `devbox run ci`. Outside the direnv shell, prefix mix with `devbox run --`.
+All tooling runs inside devbox (direnv activates it on `cd`; `MIX_ENV=test` and `LOG_LEVEL=warning` are devbox defaults). The init hook stays cheap — it only exports `MIX_HOME`, `HEX_HOME` and `ERL_AFLAGS` and points `core.hooksPath` at `.githooks/` — and `devbox run setup` does the heavy work: hex, rebar, `mix deps.get`, `initdb` into `.devbox/virtenv/postgresql/data` (superuser `postgres`, trust auth, `max_connections=200`) and starting the `postgresql` plugin service on port 5544, waiting for `pg_isready`. It is idempotent, so re-run it whenever Postgres is not up; there is no Docker, and CI runs it as its own step before `devbox run ci`. Outside the direnv shell, prefix mix with `devbox run --`.
 
 ```bash
 devbox run setup                          # mix tooling + Postgres, run this first
@@ -39,6 +39,10 @@ devbox run test.stop                      # stop the Postgres service
 ```
 
 The `test` alias recreates and re-migrates the test repo first, and appends `--warnings-as-errors` — a compiler warning fails the suite.
+
+## Releases
+
+Commit subjects must be Conventional Commits — work lands directly on `main`, so `.githooks/commit-msg` is the only gate before release-please reads the history. The devbox `init_hook` sets `core.hooksPath`, because git ignores hooks a clone ships with; it is deliberately not in `devbox run setup`, so the hook is live on shell entry without a setup run. `release-please.yml` keeps a release PR open on every push to `main`; merging it bumps `version:` in `mix.exs`, writes `CHANGELOG.md`, tags `vX.Y.Z` and cuts a GitHub release. Never edit `version:` or `.release-please-manifest.json` by hand. Pre-1.0 bumping is set by `bump-minor-pre-major` and `bump-patch-for-minor-pre-major` in `release-please-config.json`: `feat`/`fix` → patch, `!` → minor. The release PR is opened with the default `GITHUB_TOKEN`, so CI does not run on it.
 
 ## Layout conventions
 

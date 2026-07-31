@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Rejects subjects release-please cannot read. Commits land straight on main, so
+# the changelog and the version bump are decided here, not in a pull request.
+set -euo pipefail
+
+types='build|chore|ci|deps|docs|feat|fix|perf|refactor|revert|style|test'
+subject=$(head -n 1 "$1")
+
+# Empty or comment-only messages: let git abort the commit on its own.
+if [[ -z "${subject//[[:space:]]/}" || "$subject" == \#* ]]; then
+  exit 0
+fi
+
+# git writes these subjects itself, or rewrites them on the next rebase.
+if [[ "$subject" =~ ^(Merge|Revert|fixup!|squash!|amend!) ]]; then
+  exit 0
+fi
+
+if [[ ! "$subject" =~ ^($types)(\([a-z0-9._/-]+\))?!?:\ .+ ]]; then
+  {
+    echo "commit-msg: subject is not a Conventional Commit."
+    echo "  got:      $subject"
+    echo "  expected: <type>[(scope)][!]: <description>"
+    echo "  types:    ${types//|/, }"
+    echo
+    echo "feat bumps the patch version, fix and perf too, ! bumps the minor."
+    echo "build, chore, ci, style and test stay out of the CHANGELOG."
+  } >&2
+  exit 1
+fi

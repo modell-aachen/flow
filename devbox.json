@@ -17,6 +17,7 @@
   },
   "shell": {
     "init_hook": [
+      "git config core.hooksPath .githooks",
       "mkdir -p .nix-mix",
       "mkdir -p .nix-hex",
       "export MIX_HOME=$PWD/.nix-mix",
