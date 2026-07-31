@@ -5,6 +5,8 @@ defmodule Ariadne.Flow.Query do
     @enforce_keys [:types]
     defstruct [:types, :tags]
 
+    @type t :: %__MODULE__{types: [String.t(), ...], tags: [String.t()] | nil}
+
     @query_hint "A query item must contain types and may contain tags"
     @query_hint_empty_types "A query item's types must be a non-empty list"
 
@@ -29,6 +31,9 @@ defmodule Ariadne.Flow.Query do
     defp validate!(%{types: _}), do: :ok
     defp validate!(_), do: raise(@query_hint)
   end
+
+  @typedoc "A normalised query: every event, or the items an event has to match one of."
+  @type t :: :all | [Item.t()]
 
   def matches?(:all, _event), do: true
 
