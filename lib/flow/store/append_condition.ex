@@ -9,8 +9,6 @@ defmodule Ariadne.Flow.Store.AppendCondition do
 
   @type t :: %__MODULE__{fail_if_events_match: Query.t(), after: non_neg_integer()}
 
-  def new(%__MODULE__{} = condition), do: condition
-
   def new(%{fail_if_events_match: query} = condition) do
     after_condition = Map.get(condition, :after, 0)
     %__MODULE__{fail_if_events_match: Query.new(query), after: after_condition}

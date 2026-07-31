@@ -61,14 +61,19 @@ defmodule Ariadne.Flow.Query do
     defp validate_only_last_event!(_), do: raise(@query_hint_only_last_event)
   end
 
+  @enforce_keys [:items]
+  defstruct @enforce_keys
+
   @typedoc "A normalised query: every event, or the items an event has to match one of."
-  @type t :: :all | [Item.t()]
+  @type t :: %__MODULE__{items: :all | [Item.t()]}
 
-  def new(:all), do: :all
+  def new(%__MODULE__{} = query), do: query
 
-  def new(query) when is_list(query) do
-    query
-    |> Enum.map(&Item.new/1)
-    |> Optimizer.optimize()
+  def new(:all), do: %__MODULE__{items: :all}
+
+  def new(items) when is_list(items) do
+    items = Enum.map(items, &Item.new/1)
+
+    %__MODULE__{items: Optimizer.optimize(items)}
   end
 end

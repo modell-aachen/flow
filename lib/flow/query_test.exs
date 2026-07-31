@@ -2,12 +2,23 @@ defmodule Ariadne.Flow.QueryTest do
   use ExUnit.Case, async: true
   alias Ariadne.Flow.Query
 
-  test "Queries over every event normalise to themselves" do
-    assert :all == Query.new(:all)
+  test "Queries over every event normalise to a query over every event" do
+    assert %Query{items: :all} == Query.new(:all)
+  end
+
+  test "A normalised query normalises to itself" do
+    query = Query.new([%{types: ["TestEvent"], tags: ["test_tag"]}])
+
+    assert query == Query.new(query)
+    assert Query.new(:all) == Query.new(Query.new(:all))
   end
 
   test "Queries normalise their items and optimize them" do
-    assert [%Query.Item{types: ["TestEvent"], tags: ["test_tag"], only_last_event: false}] =
+    assert %Query{
+             items: [
+               %Query.Item{types: ["TestEvent"], tags: ["test_tag"], only_last_event: false}
+             ]
+           } =
              Query.new([
                %{types: ["TestEvent"], tags: ["test_tag"]},
                %{types: ["TestEvent"], tags: ["test_tag", "other_tag"]}
@@ -18,14 +29,15 @@ defmodule Ariadne.Flow.QueryTest do
     assert %Query.Item{types: ["Ariadne.Flow.QueryTest"]} =
              Query.Item.new(%{types: [Ariadne.Flow.QueryTest]})
 
-    assert [%Query.Item{types: ["Ariadne.Flow.QueryTest"]}] =
+    assert %Query{items: [%Query.Item{types: ["Ariadne.Flow.QueryTest"]}]} =
              Query.new([%{types: [Ariadne.Flow.QueryTest]}])
   end
 
   test "Query items want every match unless they ask for only the last event" do
-    assert [%Query.Item{only_last_event: false}] = Query.new([%{types: ["TestEvent"]}])
+    assert %Query{items: [%Query.Item{only_last_event: false}]} =
+             Query.new([%{types: ["TestEvent"]}])
 
-    assert [%Query.Item{only_last_event: true}] =
+    assert %Query{items: [%Query.Item{only_last_event: true}]} =
              Query.new([%{types: ["TestEvent"], only_last_event: true}])
   end
 
@@ -33,7 +45,7 @@ defmodule Ariadne.Flow.QueryTest do
     assert %Query.Item{only_last_event: false} =
              Query.Item.new(%{types: ["TestEvent"], only_last_event: nil})
 
-    assert [%Query.Item{only_last_event: false}] =
+    assert %Query{items: [%Query.Item{only_last_event: false}]} =
              Query.new([%{types: ["TestEvent"], only_last_event: nil}])
   end
 

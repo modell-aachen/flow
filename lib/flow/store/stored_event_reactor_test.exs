@@ -6,7 +6,7 @@ defmodule Ariadne.Flow.Store.StoredEventReactorTest do
   test "new/1 normalises the query and defaults the position to start after" do
     assert %StoredEventReactor{
              name: "echo",
-             query: [%Query.Item{types: ["ItemAdded"], only_last_event: false}],
+             query: %Query{items: [%Query.Item{types: ["ItemAdded"], only_last_event: false}]},
              start_after_position: 0
            } = new(%{query: [%{types: ["ItemAdded"]}]})
   end

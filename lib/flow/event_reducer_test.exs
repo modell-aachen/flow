@@ -52,7 +52,7 @@ defmodule Ariadne.Flow.EventReducerTest do
 
       assert %{
                read: %Store.Read{
-                 query: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}],
+                 query: %{items: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}]},
                  events: [%Store.SequencedEvent{position: 1}],
                  last_position: 1
                }
@@ -67,7 +67,7 @@ defmodule Ariadne.Flow.EventReducerTest do
       assert %{
                result: 2,
                read: %Store.Read{
-                 query: [%{only_last_event: true}],
+                 query: %{items: [%{only_last_event: true}]},
                  events: [%Store.SequencedEvent{position: 2}]
                }
              } = EventReducer.evaluate(last_count_projection(), store)
