@@ -100,20 +100,23 @@ defmodule Ariadne.Flow.Store.InMemory.State do
 
   defp filter(sequenced_events, :all) when is_list(sequenced_events), do: sequenced_events
 
-  # Each item selects on its own, so an item asking for its last event gets that one
-  # whatever the items beside it match.
   defp filter(sequenced_events, query) when is_list(sequenced_events) and is_list(query) do
     query
-    |> Enum.flat_map(&matches_of_item(sequenced_events, &1))
+    |> Enum.flat_map(&select(sequenced_events, &1))
     |> Enum.uniq_by(& &1.position)
     |> Enum.sort_by(& &1.position)
   end
 
-  defp matches_of_item(sequenced_events, %Query.Item{} = item) do
+  defp select(sequenced_events, %Query.Item{} = item) do
     sequenced_events
     |> Enum.filter(&Query.Item.matches?(item, &1.event))
-    |> Query.select_last(item)
+    |> take_last(item)
   end
+
+  defp take_last(sequenced_events, %Query.Item{only_last_event: true}),
+    do: Enum.take(sequenced_events, -1)
+
+  defp take_last(sequenced_events, %Query.Item{only_last_event: false}), do: sequenced_events
 
   defp append_events(state, events, opts) do
     created_at = Keyword.get(opts, :created_at, DateTime.utc_now())

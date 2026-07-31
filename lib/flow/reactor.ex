@@ -24,8 +24,6 @@ defmodule Ariadne.Flow.Reactor do
     if matches?(filter, event), do: handler.(event, metadata), else: :ok
   end
 
-  # A reactor's checkpoint moves past every event of the batch it was handed, so an
-  # event its query left out is not delivered later either.
   defp new_filter(filter) do
     case Query.Item.new(filter) do
       %Query.Item{only_last_event: true} -> raise(@filter_hint_only_last_event)

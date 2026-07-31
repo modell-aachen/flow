@@ -309,8 +309,6 @@ defmodule Ariadne.Flow.Store.Postgres do
     |> restrict_to_last_event(item)
   end
 
-  # The union operands are subqueries, so the item's own ordering and limit stay inside
-  # it and pick the last event of that item rather than of the whole query.
   defp restrict_to_last_event(query, %{only_last_event: false}), do: query
 
   defp restrict_to_last_event(query, %{only_last_event: true}) do
