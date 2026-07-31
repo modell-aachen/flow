@@ -82,7 +82,9 @@ Use `ok` and `err` whenever the reducer returns a tagged tuple — commands are 
 
 When a reducer's handler reads from the `metadata` argument, the test needs to control what metadata each event carries. `given` accepts two forms for this:
 
-- Plain event structs (`%CourseDefined{...}`) — the DSL wraps each in `%{event: ..., metadata: %{created_at: ~U[2000-01-01 12:00:00Z]}}` automatically. Use this form when the handler ignores metadata.
-- Pre-wrapped sequenced events (`%{event: ..., metadata: %{...}}`) — used as-is. Use this form when the handler reads metadata fields, for example a custom timestamp, a user id, or a trace id.
+- Plain event structs (`%CourseDefined{...}`) — the DSL wraps each in an envelope with `metadata: %{created_at: ~U[2000-01-01 12:00:00Z]}` automatically. Use this form when the handler ignores metadata.
+- Pre-wrapped sequenced events (`%{event: ..., metadata: %{...}}`) — the metadata is kept as given. Use this form when the handler reads metadata fields, for example a custom timestamp, a user id, or a trace id.
+
+Either way the DSL builds the same envelope an event read from the store arrives in: the decoded event and its metadata, plus the stored type and tags the reducer's filter matches against.
 
 Each given event still passes through the reducer's filter just like an event read from the store, so only events whose types and tags match will affect the result.

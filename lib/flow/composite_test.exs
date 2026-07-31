@@ -59,7 +59,8 @@ defmodule Ariadne.Flow.CompositeTest do
     assert %{count_exists?: true, model: %{count_exists?: true}} =
              Composite.reduce(composite, given([%CountEvent{}]))
 
-    assert [%{types: [CountEvent]}, %{types: [CountEvent]}] = Composite.query(composite)
+    assert [%{types: [count_event]}, %{types: [count_event]}] = Composite.query(composite)
+    assert count_event == "Ariadne.Flow.CompositeTest.CountEvent"
   end
 
   test "A composite lets each child pick the events its own filter asks for" do

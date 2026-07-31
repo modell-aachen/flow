@@ -60,14 +60,13 @@ defmodule Ariadne.Flow.ReactorTest do
   test "handle/2 returns the user function's result" do
     reactor = build_reactor(fn _, _ -> {:error, :boom} end)
 
-    assert {:error, :boom} ==
-             Reactor.handle(reactor, %{event: %ExampleEvent{id: 1}, metadata: %{}})
+    assert {:error, :boom} == Reactor.handle(reactor, envelope(%ExampleEvent{id: 1}))
   end
 
   test "handle/2 skips events whose type does not match the filter" do
     reactor = build_reactor(fn _, _ -> raise "should not be called" end)
 
-    assert :ok == Reactor.handle(reactor, %{event: %UnrelatedEvent{}, metadata: %{}})
+    assert :ok == Reactor.handle(reactor, envelope(%UnrelatedEvent{}))
   end
 
   test "handle/2 skips events whose tags do not satisfy the filter" do
@@ -77,7 +76,7 @@ defmodule Ariadne.Flow.ReactorTest do
         fn _, _ -> raise "should not be called" end
       )
 
-    assert :ok == Reactor.handle(reactor, %{event: %ExampleEvent{id: 1}, metadata: %{}})
+    assert :ok == Reactor.handle(reactor, envelope(%ExampleEvent{id: 1}))
   end
 
   test "new/2 defaults start_after_position to 0" do
@@ -108,14 +107,15 @@ defmodule Ariadne.Flow.ReactorTest do
     assert %Reactor{sync: true} = reactor
   end
 
-  test "query/1 exposes the filter as a Query.Item list" do
+  test "query/1 exposes the filter as a Query.Item list holding serialized types" do
     reactor =
       Reactor.new(
         %{name: "example", filter: %{types: [ExampleEvent], tags: ["thing:1"]}},
         fn _, _ -> :ok end
       )
 
-    assert [%Query.Item{types: [ExampleEvent], tags: ["thing:1"]}] = Reactor.query(reactor)
+    assert [%Query.Item{types: ["Ariadne.Flow.ReactorTest.ExampleEvent"], tags: ["thing:1"]}] =
+             Reactor.query(reactor)
   end
 
   test "new/2 validates the filter via Query.Item" do
@@ -149,4 +149,6 @@ defmodule Ariadne.Flow.ReactorTest do
     args = [params, handler]
     apply(Reactor, :new, args)
   end
+
+  defp envelope(event), do: hd(given([event]))
 end

@@ -61,7 +61,7 @@ defmodule Ariadne.Flow.ReactorRun do
     stored_event_reactor =
       StoredEventReactor.new(%{
         name: reactor.name,
-        query: Codec.serialize_query_items(Reactor.query(reactor)),
+        query: Reactor.query(reactor),
         handler: fn events -> run_handler(reactor, events) end,
         start_after_position: reactor.start_after_position
       })

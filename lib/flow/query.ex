@@ -2,6 +2,8 @@ defmodule Ariadne.Flow.Query do
   alias Ariadne.Flow.Query.Optimizer
 
   defmodule Item do
+    alias Ariadne.Flow.Store.Event.Codec
+
     @enforce_keys [:types]
     defstruct [:types, :tags, only_last_event: false]
 
@@ -19,7 +21,7 @@ defmodule Ariadne.Flow.Query do
       validate!(item)
 
       %__MODULE__{
-        types: item.types,
+        types: Enum.map(item.types, &serialize_type/1),
         tags: Map.get(item, :tags),
         only_last_event: only_last_event?(item)
       }
@@ -31,6 +33,9 @@ defmodule Ariadne.Flow.Query do
 
     def take_last(events, %__MODULE__{only_last_event: true}), do: Enum.take(events, -1)
     def take_last(events, %__MODULE__{only_last_event: false}), do: events
+
+    defp serialize_type(type) when is_binary(type), do: type
+    defp serialize_type(type) when is_atom(type), do: Codec.serialize_type(type)
 
     defp only_last_event?(%{only_last_event: only_last_event}) when is_boolean(only_last_event),
       do: only_last_event

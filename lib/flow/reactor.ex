@@ -1,6 +1,5 @@
 defmodule Ariadne.Flow.Reactor do
   alias Ariadne.Flow.Query
-  alias Ariadne.Flow.Store.Event.Encoder
 
   @enforce_keys [:name, :filter, :handler]
   defstruct [:name, :filter, :handler, start_after_position: 0, sync: false]
@@ -20,8 +19,11 @@ defmodule Ariadne.Flow.Reactor do
 
   def query(%__MODULE__{filter: filter}), do: [filter]
 
-  def handle(%__MODULE__{filter: filter, handler: handler}, %{event: event, metadata: metadata}) do
-    if matches?(filter, event), do: handler.(event, metadata), else: :ok
+  def handle(
+        %__MODULE__{filter: filter, handler: handler},
+        %{event: event, metadata: metadata} = envelope
+      ) do
+    if Query.Item.matches?(filter, envelope), do: handler.(event, metadata), else: :ok
   end
 
   defp new_filter(filter) do
@@ -29,10 +31,5 @@ defmodule Ariadne.Flow.Reactor do
       %Query.Item{only_last_event: true} -> raise(@filter_hint_only_last_event)
       %Query.Item{} = item -> item
     end
-  end
-
-  defp matches?(filter, %module{} = event) do
-    %{tags: tags} = Encoder.encode(event)
-    Query.Item.matches?(filter, %{type: module, tags: tags})
   end
 end

@@ -78,6 +78,7 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
 - `{:ok, %{events: entries}}` — the command emitted events and they were appended. `entries` is a list with one map per appended event, each carrying:
   - `:event` — the event struct the command emitted.
   - `:metadata` — the metadata stored with the event, including the default `:created_at`.
+  - `:type` and `:tags` — the stored form of the event, as `Ariadne.Flow.Store.Event.Encoder` wrote it.
 - `{:error, reason}` — the command returned `{:error, reason}`. Nothing is written and the reason is passed back unchanged.
 
 `dispatch/3` is the only way events enter the store in an `Ariadne.Flow` program — every write goes through a command and is justified by the events that came before it.

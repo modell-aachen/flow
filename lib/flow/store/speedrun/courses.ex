@@ -43,29 +43,27 @@ defmodule Ariadne.Flow.Store.Speedrun.Courses do
   end
 
   defp define_course(store, course_id) do
-    query = [course_exists_query_item(course_id)]
-    %{events: [] = events} = Store.read(store, query)
+    %{events: []} = read = Store.read(store, [course_exists_query_item(course_id)])
 
     {:ok, _} =
       Store.append(store, course_defined_event(course_id),
-        condition: AppendCondition.for_read(query, events)
+        condition: AppendCondition.for_read(read)
       )
   end
 
   defp subscribe_student_to_course(store, student_id, course_id) do
-    query = [
-      course_exists_query_item(course_id),
-      course_capacity_query_item(course_id),
-      student_already_subscribed_query_item(student_id, course_id),
-      number_of_course_subscriptions_query_item(course_id),
-      number_of_student_subscription_query_item(student_id)
-    ]
-
-    %{events: events} = Store.read(store, query)
+    read =
+      Store.read(store, [
+        course_exists_query_item(course_id),
+        course_capacity_query_item(course_id),
+        student_already_subscribed_query_item(student_id, course_id),
+        number_of_course_subscriptions_query_item(course_id),
+        number_of_student_subscription_query_item(student_id)
+      ])
 
     {:ok, _} =
       Store.append(store, student_subscribed_to_course_event(student_id, course_id),
-        condition: AppendCondition.for_read(query, events)
+        condition: AppendCondition.for_read(read)
       )
   end
 

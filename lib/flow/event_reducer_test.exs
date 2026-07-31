@@ -46,13 +46,16 @@ defmodule Ariadne.Flow.EventReducerTest do
       assert %{result: 2} = EventReducer.evaluate(num_counts_projection(), store)
     end
 
-    test "returns the reducer's serialized query and the events it read" do
+    test "returns the read it reduced, carrying the normalised query" do
       store = Store.InMemory.init()
       append(store, 1)
 
       assert %{
-               query: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}],
-               events: [%Store.SequencedEvent{position: 1}]
+               read: %Store.Read{
+                 query: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}],
+                 events: [%Store.SequencedEvent{position: 1}],
+                 last_position: 1
+               }
              } = EventReducer.evaluate(num_counts_projection(), store)
     end
 
@@ -63,15 +66,18 @@ defmodule Ariadne.Flow.EventReducerTest do
 
       assert %{
                result: 2,
-               query: [%{only_last_event: true}],
-               events: [%Store.SequencedEvent{position: 2}]
+               read: %Store.Read{
+                 query: [%{only_last_event: true}],
+                 events: [%Store.SequencedEvent{position: 2}]
+               }
              } = EventReducer.evaluate(last_count_projection(), store)
     end
 
     test "returns the result of an empty event stream" do
       store = Store.InMemory.init()
 
-      assert %{result: 0, events: []} = EventReducer.evaluate(num_counts_projection(), store)
+      assert %{result: 0, read: %Store.Read{events: [], last_position: 0}} =
+               EventReducer.evaluate(num_counts_projection(), store)
     end
   end
 end
