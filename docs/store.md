@@ -1,6 +1,6 @@
 # Store
 
-An event store is where all events live. `Ariadne.Flow.Application` uses a store for every `query/2` and `dispatch/3`. Flow ships a Postgres-backed store.
+An event store is where all events live. `Ariadne.Flow.Application` uses a store for every `query/2` and `dispatch/3`. Flow ships a Postgres-backed store, and an in-memory one for tests.
 
 ## Postgres store
 
@@ -57,3 +57,21 @@ An error *return* is not a rollback. `{:error, reason}` comes back as it is, wit
 The transaction also joins an ambient one — its own `transaction/2`, or, with the Postgres store, any transaction on the same repo — rather than committing independently inside it.
 
 `Application.dispatch/3` wraps every dispatch in `transaction/2`, so a command's append and the pass over the reactors that react to it commit as one unit, and a crash part-way through cannot leave the events appended with only some of the reactors advanced.
+
+## Backends
+
+`Ariadne.Flow.Store` stores nothing itself. A store is a backend module paired with the config that backend needs — `%Ariadne.Flow.Store{module: Ariadne.Flow.Store.Postgres, config: ...}` — and every call to `Ariadne.Flow.Store` is dispatched to the backend, with the parts that are the same for all of them, query normalisation and telemetry, done first. `Ariadne.Flow.Store.Backend` is the contract those modules implement:
+
+| Callback | Does |
+| --- | --- |
+| `init/1` | builds the store — the one backend function callers name directly |
+| `read/3` | returns the events matching a query, in position order |
+| `append/3` | writes events atomically, honouring the append condition it was given |
+| `consume/2` | hands a reactor its next batch of events and records how far it got |
+| `transaction/2` | runs a function, rolling its writes back if it raises |
+| `telemetry_metadata/1` | the metadata that identifies this storage on store telemetry |
+| `dump/1` and `load/1` | serialise the config, so a store can travel to a job system |
+
+Flow ships two backends. `Ariadne.Flow.Store.Postgres` is the one to run on. `Ariadne.Flow.Store.InMemory` keeps its events in an Agent, for tests and for anything else that wants a store without a database behind it; it dumps to the agent itself, so a store built from it round-trips within a node but cannot be handed to another one.
+
+A third backend is a matter of satisfying the contract, not just defining the callbacks — total order over positions, a conditional append no concurrent writer can slip past, isolation between configs, checkpoints that survive. `Ariadne.Flow.Store.Backend` spells out what each callback owes its caller, `Ariadne.Flow.Store.InMemory` is short enough to read as the reference implementation, and the store test suite is parameterised over the shipped backends, so every case in it holds for any backend.

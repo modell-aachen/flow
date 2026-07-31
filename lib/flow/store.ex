@@ -1,10 +1,22 @@
 defmodule Ariadne.Flow.Store do
+  @moduledoc """
+  A store: a backend module paired with the config that backend needs.
+
+  Every function here dispatches to the backend and adds what is the same for all of
+  them — query and append condition normalisation, telemetry spans. What a backend has
+  to provide in return is `Ariadne.Flow.Store.Backend`. Build a store with the
+  backend's own `init/1`, `Ariadne.Flow.Store.Postgres.init/1` for the store Flow ships
+  for production use.
+  """
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store.AppendCondition
+  alias Ariadne.Flow.Store.Backend
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @enforce_keys [:module, :config]
   defstruct @enforce_keys
+
+  @type t :: %__MODULE__{module: module(), config: Backend.config()}
 
   def read(%__MODULE__{module: module, config: config}, query \\ :all, opts \\ []) do
     query = Query.new(query)

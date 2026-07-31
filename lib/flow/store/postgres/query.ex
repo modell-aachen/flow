@@ -63,11 +63,12 @@ defmodule Ariadne.Flow.Store.Postgres.Query do
   end
 
   def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, :all, opts) do
+    after_position = Keyword.get(opts, :after, 0)
     limit = Keyword.get(opts, :limit)
 
     events =
       EctoEvent
-      |> where([e], e.context == ^context)
+      |> where([e], e.context == ^context and e.position > ^after_position)
       |> order_by([e], e.position)
       |> apply_limit(limit)
       |> repo.all(prefix: prefix)

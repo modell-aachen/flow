@@ -174,6 +174,28 @@ defmodule Ariadne.Flow.StoreTest do
              } = Store.read(store, [%{types: ["PageCreated"], tags: ["page:Page 2"]}])
     end
 
+    test "skips events up to the position read after", %{store: store} do
+      first = append_position!(store, "ItemAdded")
+      second = append_position!(store, "ItemAdded")
+
+      assert %{events: [%{position: ^second}]} = Store.read(store, :all, after: first)
+
+      assert %{events: [%{position: ^second}]} =
+               Store.read(store, [%{types: ["ItemAdded"]}], after: first)
+
+      assert %{events: []} = Store.read(store, :all, after: second)
+    end
+
+    test "reads at most as many events as the limit", %{store: store} do
+      first = append_position!(store, "ItemAdded")
+      append_position!(store, "ItemAdded")
+
+      assert %{events: [%{position: ^first}]} = Store.read(store, :all, limit: 1)
+
+      assert %{events: [%{position: ^first}]} =
+               Store.read(store, [%{types: ["ItemAdded"]}], limit: 1)
+    end
+
     test "appends events with an append condition", %{store: store} do
       {:ok, %{events: [%SequencedEvent{position: position, created_at: created_at}]}} =
         result =
