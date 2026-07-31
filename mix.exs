@@ -62,6 +62,7 @@ defmodule Flow.MixProject do
         "sobelow --skip --exit"
       ],
       ci: [
+        "compile --force --warnings-as-errors",
         "test --max-cases=8",
         "check"
       ]
