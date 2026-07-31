@@ -477,6 +477,22 @@ defmodule Ariadne.Flow.StoreTest do
       assert p2 < p3
     end
 
+    test "normalises the reactor's query before dispatching to the backend", %{store: store} do
+      append!(store, "ItemAdded")
+
+      handler = recording_handler(self(), "echo")
+
+      raw_query_reactor = %StoredEventReactor{
+        name: "echo",
+        query: [%{types: ["ItemAdded"]}],
+        handler: handler
+      }
+
+      assert %ConsumeResult{status: :ok, processed: 1} = Store.consume(store, raw_query_reactor)
+
+      assert_received {:got, "echo", %SequencedEvent{event: %Event{type: "ItemAdded"}}}
+    end
+
     test "skips events that do not match the query", %{store: store} do
       append!(store, "ItemAdded")
       append!(store, "ItemRemoved")
