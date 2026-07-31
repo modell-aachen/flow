@@ -7,7 +7,11 @@ defmodule Ariadne.Flow.Examples.PageResponsible.ReadModels do
     Projection.new(
       %{
         initial_state: false,
-        filter: %{types: [Events.PageCreated, Events.PageDeleted], tags: Events.page_tags(id)}
+        filter: %{
+          types: [Events.PageCreated, Events.PageDeleted],
+          tags: Events.page_tags(id),
+          only_last_event: true
+        }
       },
       fn
         _state, %Events.PageCreated{}, _ -> true
@@ -22,7 +26,8 @@ defmodule Ariadne.Flow.Examples.PageResponsible.ReadModels do
         initial_state: nil,
         filter: %{
           types: [Events.PageCreated, Events.PageResponsibleChanged],
-          tags: Events.page_tags(id)
+          tags: Events.page_tags(id),
+          only_last_event: true
         }
       },
       fn
@@ -38,7 +43,8 @@ defmodule Ariadne.Flow.Examples.PageResponsible.ReadModels do
         initial_state: false,
         filter: %{
           types: [Events.ModuleAccessChanged],
-          tags: Events.module_tags(id)
+          tags: Events.module_tags(id),
+          only_last_event: true
         }
       },
       fn

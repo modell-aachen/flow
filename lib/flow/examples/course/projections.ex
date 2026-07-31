@@ -7,7 +7,8 @@ defmodule Ariadne.Flow.Examples.Course.Projections do
       %{
         filter: %{
           types: [Events.CourseDefined],
-          tags: [Events.course_tag(course_id)]
+          tags: [Events.course_tag(course_id)],
+          only_last_event: true
         },
         initial_state: false
       },
@@ -20,7 +21,8 @@ defmodule Ariadne.Flow.Examples.Course.Projections do
       %{
         filter: %{
           types: [Events.CourseDefined, Events.CourseCapacityChanged],
-          tags: [Events.course_tag(course_id)]
+          tags: [Events.course_tag(course_id)],
+          only_last_event: true
         },
         initial_state: 0
       },

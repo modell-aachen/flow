@@ -54,35 +54,6 @@ A projection consists of the following essential parts:
 
 `types` is required and must be a non-empty list. `tags` is optional — omit it to match every event of the listed types regardless of tags.
 
-### Reducing the last event only
-
-A filter can also carry `only_last_event: true`. The filter then matches as it otherwise would, but of all the events it matches only the last one — the one appended most recently — reaches the handler. One event in total, not one per listed type: the filter below yields the newest of the `CourseDefined` and `CourseCapacityChanged` events together, which is what makes it a capacity.
-
-```elixir
-def current_capacity(course_id) do
-  Projection.new(%{
-    filter: %{
-      types: [CourseDefined, CourseCapacityChanged],
-      tags: ["course:#{course_id}"],
-      only_last_event: true
-    },
-    initial_state: 0,
-    handler: fn
-      _state, %CourseDefined{capacity: capacity}, _metadata -> capacity
-      _state, %CourseCapacityChanged{new_capacity: new}, _metadata -> new
-    end
-  })
-end
-```
-
-This is the same result as `course_capacity/1` above, reached without the superseded capacity changes travelling out of the store and through the reducer. Use it where the state is decided by the newest matching event alone; a projection that counts, sums or otherwise accumulates needs every event and must leave the option out.
-
-What the option saves for certain is rows fetched and reduced, not necessarily rows scanned. The Postgres store puts the selection inside the item's own query as an `ORDER BY position DESC LIMIT 1`, which for a filter without `tags` is a backward walk of the position index that stops at the first hit. A tag-restricted filter joins the tag table and aggregates per position to enforce its AND-semantics, so whether the database can stop at the first group is the query planner's decision rather than a guarantee.
-
-`only_last_event` applies per filter, not per query. Each filter of a composite picks the last of *its own* matches, so `%{types: [CourseCapacityChanged], only_last_event: true}` and `%{types: [StudentSubscribedToCourse], only_last_event: true}` in one composite yield one event each, and a filter without the option beside them still sees all of its matches.
-
-A reducer's query is also what its command's append condition is built from ([Concurrency](application.html#concurrency)), and there the option changes nothing: an event matching the filter has appeared since the read exactly when the last matching event has. A command reducing `current_capacity/1` conflicts on the same events as one reducing `course_capacity/1`.
-
 The projection above is tied to course 42. To make it reusable for any course, wrap the construction in a function:
 
 ```elixir
@@ -132,6 +103,37 @@ def course_subscriptions(course_id) do
   })
 end
 ```
+
+### Reducing the last event only
+
+Those two projections differ in more than their handlers. `course_subscriptions/1` genuinely needs every event it matches — take one away and the count is wrong. `course_capacity/1` does not: every clause of its handler ignores the state it was given and returns a value read off the event, so the newest matching event alone decides the result. The earlier ones are the same — `course_exists/1` answers `true` from any one match.
+
+A filter that only needs its newest match can say so with `only_last_event: true`:
+
+```elixir
+def course_capacity(course_id) do
+  Projection.new(%{
+    filter: %{
+      types: [CourseDefined, CourseCapacityChanged],
+      tags: ["course:#{course_id}"],
+      only_last_event: true
+    },
+    initial_state: 0,
+    handler: fn
+      _state, %CourseDefined{capacity: capacity}, _metadata -> capacity
+      _state, %CourseCapacityChanged{new_capacity: new}, _metadata -> new
+    end
+  })
+end
+```
+
+The filter still matches what it matched before, but of all the events it matches only the last one reaches the handler — one event in total, not one per listed type. Here that is the newest of the `CourseDefined` and `CourseCapacityChanged` events together, which is exactly what a current capacity is. The superseded capacity changes never leave the store. This is the form the course example in `lib/flow/examples/` ships.
+
+What the option saves for certain is rows fetched and reduced, not necessarily rows scanned. The Postgres store puts the selection inside the item's own query as an `ORDER BY position DESC LIMIT 1`, which for a filter without `tags` is a backward walk of the position index that stops at the first hit. A tag-restricted filter joins the tag table and aggregates per position to enforce its AND-semantics, so whether the database can stop at the first group is the query planner's decision rather than a guarantee.
+
+`only_last_event` applies per filter, not per query. Each filter of a composite picks the last of *its own* matches, so `course_exists/1` and `course_capacity/1` in one composite yield one event each — the last `CourseDefined`, and the last event of either type — and a filter without the option beside them still sees all of its matches.
+
+A reducer's query is also what its command's append condition is built from ([Concurrency](application.html#concurrency)), and there the option changes nothing: an event matching the filter has appeared since the read exactly when the last matching event has. The capacity projection above conflicts on the same events with the option as without it.
 
 ## Composite
 

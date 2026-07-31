@@ -35,7 +35,8 @@ defmodule Ariadne.Flow.Examples.Course.SubscribeStudentToCourse do
       %{
         filter: %{
           types: [Events.StudentSubscribedToCourse],
-          tags: [Events.student_tag(student_id), Events.course_tag(course_id)]
+          tags: [Events.student_tag(student_id), Events.course_tag(course_id)],
+          only_last_event: true
         },
         initial_state: false
       },
