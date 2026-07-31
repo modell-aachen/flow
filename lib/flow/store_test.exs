@@ -111,14 +111,7 @@ defmodule Ariadne.Flow.StoreTest do
         %Event{type: "PageDeleted", data: %{}, tags: []}
       ])
 
-      assert %{
-               events: [],
-               append_condition: %{
-                 fail_if_events_match: [],
-                 after: 0
-               }
-             } =
-               Store.read(store, [])
+      assert %{events: []} = Store.read(store, [])
     end
 
     test "queries events by type", %{store: store} do
@@ -127,16 +120,8 @@ defmodule Ariadne.Flow.StoreTest do
         %Event{type: "PageDeleted", data: %{}, tags: []}
       ])
 
-      assert %{
-               events: [%{event: %Event{type: "PageCreated"}, position: event_position}],
-               append_condition: %{
-                 fail_if_events_match: [%{types: ["PageCreated"]}],
-                 after: after_position
-               }
-             } =
+      assert %{events: [%{event: %Event{type: "PageCreated"}}]} =
                Store.read(store, [%{types: ["PageCreated"]}])
-
-      assert after_position == event_position
 
       assert %{
                events: [

@@ -52,7 +52,7 @@ Commit subjects must be Conventional Commits — work lands directly on `main`, 
 
 ## Internals the guides don't cover
 
-**`EventReducer.evaluate/2` is the single seam between pure reducers and the store.** It asks the reducer for its query, reads, deserialises, reduces, and returns `{result, append_condition}` — where that condition is the reducer's own query plus the last position it saw. One declaration therefore decides both what is read and what conflicts on write; everything docs/application.md says about concurrency falls out of this function.
+**`EventReducer` is the single seam between pure reducers and the store.** Both entry points ask the reducer for its query, read, deserialise and reduce; `evaluate/2` returns just the result (the read path, `Application.query/2`), while `evaluate_for_append/2` also returns an append condition — the reducer's own query plus the last position it saw — for the write path (`CommandHandler`). One declaration therefore decides both what is read and what conflicts on write; everything docs/application.md says about concurrency falls out of `evaluate_for_append/2`. `Store.read/3` itself knows nothing about append conditions; `AppendCondition.for_read/2` builds one from a query and the events that read returned.
 
 **Store dispatch is hand-rolled, not a protocol or behaviour.** `%Store{module:, config:}` and `Store` calls `module.read/append/consume/transaction/telemetry_metadata/dump/load`. Two backends: `Store.Postgres` and `Store.InMemory` (an Agent for tests; its `dump`/`load` are node-local and don't cross nodes). `Store.read/append` wrap the backend in `:telemetry.span([:ariadne, :flow, :store, :read | :append])`, which is what `Store.SlowOperationLogger` attaches to.
 

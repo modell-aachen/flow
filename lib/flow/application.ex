@@ -41,8 +41,7 @@ defmodule Ariadne.Flow.Application do
   end
 
   def query(%__MODULE__{store: store}, event_reducer) do
-    {result, _} = EventReducer.evaluate(event_reducer, store)
-    result
+    EventReducer.evaluate(event_reducer, store)
   end
 
   defp run_after_commits({:ok, result, after_commits}) do
