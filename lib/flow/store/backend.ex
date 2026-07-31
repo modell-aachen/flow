@@ -10,8 +10,9 @@ defmodule Ariadne.Flow.Store.Backend do
   Callers never invoke these callbacks directly. `Ariadne.Flow.Store` normalises the
   arguments first — the query through `Ariadne.Flow.Query.new/1`, the append condition
   through `Ariadne.Flow.Store.AppendCondition.new/1` — so a backend always receives an
-  optimised `t:Ariadne.Flow.Query.t/0` and an `t:Ariadne.Flow.Store.AppendCondition.t/0`
-  struct rather than the raw maps a caller wrote. `Ariadne.Flow.Store` also wraps
+  optimised `t:Ariadne.Flow.Query.t/0` struct and an
+  `t:Ariadne.Flow.Store.AppendCondition.t/0` struct rather than the raw lists and maps
+  a caller wrote. `Ariadne.Flow.Store` also wraps
   `c:read/3` and `c:append/3` in telemetry spans. A backend implements storage, not
   validation and not instrumentation.
 

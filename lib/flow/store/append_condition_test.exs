@@ -7,12 +7,12 @@ defmodule Ariadne.Flow.Store.AppendConditionTest do
 
   test "new/1 normalises a raw condition and defaults the position to append after" do
     assert %AppendCondition{
-             fail_if_events_match: [%Query.Item{types: ["ItemAdded"]}],
+             fail_if_events_match: %Query{items: [%Query.Item{types: ["ItemAdded"]}]},
              after: 0
            } = AppendCondition.new(%{fail_if_events_match: [%{types: ["ItemAdded"]}]})
   end
 
-  test "new/1 returns an already built condition instead of rebuilding it" do
+  test "new/1 is idempotent on an already built condition" do
     condition = AppendCondition.new(%{fail_if_events_match: [%{types: ["ItemAdded"]}], after: 7})
 
     assert condition == AppendCondition.new(condition)
@@ -32,7 +32,7 @@ defmodule Ariadne.Flow.Store.AppendConditionTest do
   test "for_read/1 conflicts on the whole store when the read saw nothing" do
     read = Store.read(Store.InMemory.init())
 
-    assert %AppendCondition{fail_if_events_match: :all, after: 0} ==
+    assert %AppendCondition{fail_if_events_match: %Query{items: :all}, after: 0} ==
              AppendCondition.for_read(read)
   end
 

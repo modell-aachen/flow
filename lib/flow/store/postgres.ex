@@ -14,6 +14,7 @@ defmodule Ariadne.Flow.Store.Postgres do
   import Ecto.Query
 
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Backend
   alias Ariadne.Flow.Store.SequencedEvent
@@ -95,7 +96,7 @@ defmodule Ariadne.Flow.Store.Postgres do
   end
 
   @impl Backend
-  def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, :all, opts) do
+  def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, %Query{items: :all}, opts) do
     after_position = Keyword.get(opts, :after, 0)
     limit = Keyword.get(opts, :limit)
 
@@ -110,17 +111,16 @@ defmodule Ariadne.Flow.Store.Postgres do
     %{events: events}
   end
 
-  def read(%__MODULE__{}, [], _opts) do
+  def read(%__MODULE__{}, %Query{items: []}, _opts) do
     %{events: []}
   end
 
-  def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, query, opts)
-      when is_list(query) do
+  def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, %Query{items: items}, opts) do
     after_position = Keyword.get(opts, :after, 0)
     limit = Keyword.get(opts, :limit)
 
     events =
-      query
+      items
       |> to_ecto_query(%{after_position: after_position, context: context, limit: limit})
       |> repo.all(prefix: prefix)
       |> Enum.map(&to_sequenced_event/1)

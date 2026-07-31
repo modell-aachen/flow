@@ -45,9 +45,9 @@ defmodule Ariadne.Flow.Store.StoredEventReactor do
   end
 
   defp new_query(query) do
-    normalised = Query.new(query)
+    %Query{items: items} = normalised = Query.new(query)
 
-    if Enum.any?(normalised, & &1.only_last_event),
+    if Enum.any?(items, & &1.only_last_event),
       do: raise(@query_hint_only_last_event),
       else: normalised
   end

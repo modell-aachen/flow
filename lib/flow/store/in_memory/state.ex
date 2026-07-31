@@ -98,10 +98,11 @@ defmodule Ariadne.Flow.Store.InMemory.State do
   defp take(list, :infinity), do: list
   defp take(list, n) when is_integer(n), do: Enum.take(list, n)
 
-  defp filter(sequenced_events, :all) when is_list(sequenced_events), do: sequenced_events
+  defp filter(sequenced_events, %Query{items: :all}) when is_list(sequenced_events),
+    do: sequenced_events
 
-  defp filter(sequenced_events, query) when is_list(sequenced_events) and is_list(query) do
-    query
+  defp filter(sequenced_events, %Query{items: items}) when is_list(sequenced_events) do
+    items
     |> Enum.flat_map(&select(sequenced_events, &1))
     |> Enum.uniq_by(& &1.position)
     |> Enum.sort_by(& &1.position)

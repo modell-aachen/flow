@@ -5,6 +5,7 @@ defmodule Ariadne.Flow.StoreTest do
       Enum.map([Ariadne.Flow.Store.InMemory, Ariadne.Flow.Store.Postgres], &%{store_module: &1})
 
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Event
   alias Ariadne.Flow.Store.SequencedEvent
@@ -124,13 +125,15 @@ defmodule Ariadne.Flow.StoreTest do
       ])
 
       assert %Store.Read{
-               query: [%Ariadne.Flow.Query.Item{types: ["PageCreated"]}],
+               query: %Query{items: [%Query.Item{types: ["PageCreated"]}]},
                events: [_, %{position: last_position}],
                last_position: last_position
              } = Store.read(store, [%{types: ["PageCreated"]}, %{types: ["PageCreated"]}])
 
-      assert %Store.Read{query: :all, events: [_, _]} = Store.read(store)
-      assert %Store.Read{query: [], events: [], last_position: 0} = Store.read(store, [])
+      assert %Store.Read{query: %Query{items: :all}, events: [_, _]} = Store.read(store)
+
+      assert %Store.Read{query: %Query{items: []}, events: [], last_position: 0} =
+               Store.read(store, [])
     end
 
     test "queries events without query items", %{store: store} do
