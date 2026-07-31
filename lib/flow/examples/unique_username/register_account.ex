@@ -12,7 +12,8 @@ defmodule Ariadne.Flow.Examples.UniqueUsername.RegisterAccount do
       %{
         filter: %{
           types: [Events.AccountRegistered, Events.UsernameChanged, Events.AccountClosed],
-          tags: [Events.username_tag(username)]
+          tags: [Events.username_tag(username)],
+          only_last_event: true
         },
         initial_state: false
       },

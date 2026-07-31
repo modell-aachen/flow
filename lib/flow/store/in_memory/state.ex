@@ -17,8 +17,8 @@ defmodule Ariadne.Flow.Store.InMemory.State do
     events =
       state.events
       |> Enum.reverse()
-      |> filter(query)
       |> Enum.filter(&(&1.position > after_position))
+      |> filter(query)
       |> take(limit)
 
     %{events: events}
@@ -29,7 +29,7 @@ defmodule Ariadne.Flow.Store.InMemory.State do
   def append(%__MODULE__{} = state, events, opts) when is_list(events) and is_list(opts) do
     append_condition = Keyword.get(opts, :condition)
 
-    if append_condition_passed?(state.events, append_condition) do
+    if append_condition_passed?(state, append_condition) do
       {new_state, appended_events} = append_events(state, events, opts)
       {:ok, new_state, appended_events}
     else
@@ -98,8 +98,19 @@ defmodule Ariadne.Flow.Store.InMemory.State do
   defp take(list, :infinity), do: list
   defp take(list, n) when is_integer(n), do: Enum.take(list, n)
 
-  defp filter(sequenced_events, query) when is_list(sequenced_events) do
-    Enum.filter(sequenced_events, &Query.matches?(query, &1.event))
+  defp filter(sequenced_events, :all) when is_list(sequenced_events), do: sequenced_events
+
+  defp filter(sequenced_events, query) when is_list(sequenced_events) and is_list(query) do
+    query
+    |> Enum.flat_map(&select(sequenced_events, &1))
+    |> Enum.uniq_by(& &1.position)
+    |> Enum.sort_by(& &1.position)
+  end
+
+  defp select(sequenced_events, %Query.Item{} = item) do
+    sequenced_events
+    |> Enum.filter(&Query.Item.matches?(item, &1.event))
+    |> Query.Item.take_last(item)
   end
 
   defp append_events(state, events, opts) do
@@ -125,16 +136,15 @@ defmodule Ariadne.Flow.Store.InMemory.State do
     {new_state, Enum.reverse(appended)}
   end
 
-  defp append_condition_passed?(_sequenced_events, nil), do: true
+  defp append_condition_passed?(_state, nil), do: true
 
-  defp append_condition_passed?(sequenced_events, %{
+  defp append_condition_passed?(%__MODULE__{} = state, %{
          fail_if_events_match: query,
          after: after_condition
        }) do
-    sequenced_events
-    |> filter(query)
-    |> Enum.filter(fn %{position: event_position} -> event_position > after_condition end)
-    |> Enum.empty?()
+    %{events: events} = read(state, query, after: after_condition, limit: 1)
+
+    Enum.empty?(events)
   end
 
   defp append_condition_passed?(_, _), do: raise("Unsupported append condition")

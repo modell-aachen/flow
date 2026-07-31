@@ -45,6 +45,27 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     end)
   end
 
+  defp last_count_command do
+    Composite.new(
+      %{count: last_count_projection()},
+      &{:ok, [%CountEvent{count: &1.count + 1}]}
+    )
+  end
+
+  defp conflicting_last_count_command(store) do
+    Composite.new(%{count: last_count_projection()}, fn %{count: count} ->
+      {:ok, _} = CommandHandler.handle(count_command(1), store)
+      {:ok, [%CountEvent{count: count + 1}]}
+    end)
+  end
+
+  defp last_count_projection do
+    Projection.new(
+      %{initial_state: 0, filter: %{types: [CountEvent], only_last_event: true}},
+      fn _state, %CountEvent{count: count}, _ -> count end
+    )
+  end
+
   defp metadata_projection do
     Projection.new(
       %{initial_state: 0, filter: %{types: [CountEvent]}},
@@ -137,6 +158,25 @@ defmodule Ariadne.Flow.CommandHandlerTest do
 
       assert {:error, :append_condition_failed} =
                CommandHandler.handle(conflicting_count_command(store), store)
+
+      assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
+    end
+
+    test "decides from the last matching event when the command's filter asks for it" do
+      store = Store.InMemory.init()
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
+               CommandHandler.handle(last_count_command(), store)
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 2}}]}} =
+               CommandHandler.handle(last_count_command(), store)
+    end
+
+    test "fails the append of a command reading only the last matching event just the same" do
+      store = Store.InMemory.init()
+
+      assert {:error, :append_condition_failed} =
+               CommandHandler.handle(conflicting_last_count_command(store), store)
 
       assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
     end

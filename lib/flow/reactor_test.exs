@@ -124,6 +124,15 @@ defmodule Ariadne.Flow.ReactorTest do
     end
   end
 
+  test "new/2 rejects a filter asking for only the last event" do
+    assert_raise RuntimeError, ~r/only_last_event/, fn ->
+      Reactor.new(
+        %{name: "example", filter: %{types: [ExampleEvent], only_last_event: true}},
+        fn _, _ -> :ok end
+      )
+    end
+  end
+
   test "new/2 requires a 2-arity handler function" do
     assert_raise FunctionClauseError, fn ->
       new(%{name: "example", filter: %{types: [ExampleEvent]}}, fn _ -> :ok end)
