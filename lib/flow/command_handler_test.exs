@@ -38,6 +38,13 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     )
   end
 
+  defp conflicting_count_command(store) do
+    Composite.new(%{count: num_counts_projection()}, fn %{count: count} ->
+      {:ok, _} = CommandHandler.handle(count_command(1), store)
+      {:ok, [%CountEvent{count: count + 1}]}
+    end)
+  end
+
   defp metadata_projection do
     Projection.new(
       %{initial_state: 0, filter: %{types: [CountEvent]}},
@@ -123,6 +130,15 @@ defmodule Ariadne.Flow.CommandHandlerTest do
       assert {:error, :count_too_high} = CommandHandler.handle(count_command(1), store)
 
       assert %{events: [_, _, _]} = Store.read(store)
+    end
+
+    test "fails the append when an event matching the command's query arrives while it decides" do
+      store = Store.InMemory.init()
+
+      assert {:error, :append_condition_failed} =
+               CommandHandler.handle(conflicting_count_command(store), store)
+
+      assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
     end
 
     test "returns the append error unchanged" do

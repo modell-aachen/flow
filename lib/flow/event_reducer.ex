@@ -7,17 +7,14 @@ defmodule Ariadne.Flow.EventReducer do
   @callback query(reducer :: struct()) :: list()
 
   def evaluate(%module{} = event_reducer, %Store{} = store) do
-    store_query =
+    query =
       event_reducer
       |> module.query()
       |> Codec.serialize_query_items()
 
-    %{events: sequence_events, append_condition: append_condition} =
-      Store.read(store, store_query)
+    %{events: sequenced_events} = Store.read(store, query)
+    result = module.reduce(event_reducer, Enum.map(sequenced_events, &Codec.deserialize/1))
 
-    stored_events = Enum.map(sequence_events, &Codec.deserialize/1)
-    result = module.reduce(event_reducer, stored_events)
-
-    {result, append_condition}
+    %{result: result, query: query, events: sequenced_events}
   end
 end

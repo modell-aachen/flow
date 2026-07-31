@@ -1,4 +1,5 @@
 defmodule Ariadne.Flow.Store.Speedrun.Courses do
+  alias Ariadne.Flow.Store.AppendCondition
   alias Ariadne.Flow.Store.Event
   alias Ariadne.Flow.Store.Speedrun.ReportingStore, as: Store
   alias Ecto.UUID
@@ -43,10 +44,12 @@ defmodule Ariadne.Flow.Store.Speedrun.Courses do
 
   defp define_course(store, course_id) do
     query = [course_exists_query_item(course_id)]
-    %{events: [], append_condition: append_condition} = Store.read(store, query)
+    %{events: [] = events} = Store.read(store, query)
 
     {:ok, _} =
-      Store.append(store, course_defined_event(course_id), condition: append_condition)
+      Store.append(store, course_defined_event(course_id),
+        condition: AppendCondition.for_read(query, events)
+      )
   end
 
   defp subscribe_student_to_course(store, student_id, course_id) do
@@ -58,11 +61,11 @@ defmodule Ariadne.Flow.Store.Speedrun.Courses do
       number_of_student_subscription_query_item(student_id)
     ]
 
-    %{append_condition: append_condition} = Store.read(store, query)
+    %{events: events} = Store.read(store, query)
 
     {:ok, _} =
       Store.append(store, student_subscribed_to_course_event(student_id, course_id),
-        condition: append_condition
+        condition: AppendCondition.for_read(query, events)
       )
   end
 

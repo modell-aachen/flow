@@ -36,19 +36,23 @@ defmodule Ariadne.Flow.EventReducerTest do
       append(store, 1)
       append(store, 2)
 
-      assert {2, _append_condition} = EventReducer.evaluate(num_counts_projection(), store)
+      assert %{result: 2} = EventReducer.evaluate(num_counts_projection(), store)
     end
 
-    test "returns an append condition scoping a later append to the folded events" do
+    test "returns the reducer's serialized query and the events it read" do
       store = Store.InMemory.init()
       append(store, 1)
 
-      {_result, append_condition} = EventReducer.evaluate(num_counts_projection(), store)
+      assert %{
+               query: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}],
+               events: [%Store.SequencedEvent{position: 1}]
+             } = EventReducer.evaluate(num_counts_projection(), store)
+    end
 
-      assert {:ok, _} = Store.append(store, [count_event(2)], condition: append_condition)
+    test "returns the result of an empty event stream" do
+      store = Store.InMemory.init()
 
-      assert {:error, :append_condition_failed} =
-               Store.append(store, [count_event(3)], condition: append_condition)
+      assert %{result: 0, events: []} = EventReducer.evaluate(num_counts_projection(), store)
     end
   end
 end

@@ -14,23 +14,10 @@ defmodule Ariadne.Flow.Store do
       [:ariadne, :flow, :store, :read],
       base_metadata,
       fn ->
-        result =
-          config
-          |> module.read(query, opts)
-          |> add_append_condition(query)
+        result = module.read(config, query, opts)
 
         {result, %{event_count: length(result.events)}, Map.put(base_metadata, :query, query)}
       end
-    )
-  end
-
-  defp add_append_condition(%{events: events} = read_result, query) do
-    after_condition = List.last(events, %{position: 0}).position
-
-    Map.put(
-      read_result,
-      :append_condition,
-      AppendCondition.new(%{fail_if_events_match: query, after: after_condition})
     )
   end
 

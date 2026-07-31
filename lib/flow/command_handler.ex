@@ -2,18 +2,22 @@ defmodule Ariadne.Flow.CommandHandler do
   @moduledoc false
   alias Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Store
+  alias Ariadne.Flow.Store.AppendCondition
   alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.Event.Encoder
 
   def handle(command, %Store{} = store, opts \\ []) do
-    {result, append_condition} = EventReducer.evaluate(command, store)
+    %{result: result, query: query, events: read_events} = EventReducer.evaluate(command, store)
 
     with {:ok, events} <- result do
       store_events = Enum.map(events, &serialize/1)
 
       append_opts =
         maybe_put(
-          [condition: append_condition, metadata: Keyword.get(opts, :metadata, %{})],
+          [
+            condition: AppendCondition.for_read(query, read_events),
+            metadata: Keyword.get(opts, :metadata, %{})
+          ],
           :created_at,
           Keyword.get(opts, :created_at)
         )

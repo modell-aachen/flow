@@ -12,4 +12,10 @@ defmodule Ariadne.Flow.Store.AppendCondition do
   end
 
   def new(_), do: raise(@append_condition_hint)
+
+  def for_read(query, sequenced_events) do
+    new(%{fail_if_events_match: query, after: last_position(sequenced_events)})
+  end
+
+  defp last_position(sequenced_events), do: List.last(sequenced_events, %{position: 0}).position
 end
