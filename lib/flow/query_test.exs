@@ -14,6 +14,14 @@ defmodule Ariadne.Flow.QueryTest do
              ])
   end
 
+  test "Query items serialize event types given as modules" do
+    assert %Query.Item{types: ["Ariadne.Flow.QueryTest"]} =
+             Query.Item.new(%{types: [Ariadne.Flow.QueryTest]})
+
+    assert [%Query.Item{types: ["Ariadne.Flow.QueryTest"]}] =
+             Query.new([%{types: [Ariadne.Flow.QueryTest]}])
+  end
+
   test "Query items want every match unless they ask for only the last event" do
     assert [%Query.Item{only_last_event: false}] = Query.new([%{types: ["TestEvent"]}])
 

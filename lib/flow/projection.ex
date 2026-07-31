@@ -1,7 +1,6 @@
 defmodule Ariadne.Flow.Projection do
   @behaviour Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Query
-  alias Ariadne.Flow.Store
   @enforce_keys [:state, :filter, :handler]
   defstruct @enforce_keys
 
@@ -12,14 +11,9 @@ defmodule Ariadne.Flow.Projection do
   @impl Ariadne.Flow.EventReducer
   def reduce(%__MODULE__{state: state, filter: filter, handler: handler}, events) do
     events
-    |> Enum.filter(&matches_query_item?(&1, filter))
+    |> Enum.filter(&Query.Item.matches?(filter, &1))
     |> Query.Item.take_last(filter)
     |> Enum.reduce(state, &build_state(&1, &2, handler))
-  end
-
-  defp matches_query_item?(%{event: %type{} = event}, filter) do
-    %{tags: tags} = Store.Event.Encoder.encode(event)
-    Query.Item.matches?(filter, %{type: type, tags: tags})
   end
 
   defp build_state(%{event: event, metadata: metadata}, state, handler) do

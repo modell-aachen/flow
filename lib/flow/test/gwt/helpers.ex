@@ -2,27 +2,33 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
   import ExUnit.Assertions
 
   alias Ariadne.Flow.Reactor
+  alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.Event.Encoder
 
   def given(events) do
     Enum.map(events, fn
-      %{event: event, metadata: metadata} -> %{event: serialized(event), metadata: metadata}
-      event -> %{event: serialized(event), metadata: %{created_at: ~U[2000-01-01 12:00:00Z]}}
+      %{event: event, metadata: metadata} -> envelope(event, metadata)
+      event -> envelope(event, %{created_at: ~U[2000-01-01 12:00:00Z]})
     end)
   end
 
-  defp serialized(%_{} = event) do
-    %{data: data} = Encoder.encode(event)
+  # The same envelope `Codec.deserialize/1` yields for a stored event: the struct after
+  # a JSON round-trip, plus the stored type and tags that filters match against.
+  defp envelope(%type{} = event, metadata) do
+    %{data: data, tags: tags} = Encoder.encode(event)
 
     store_data =
       data
       |> Jason.encode!()
       |> Jason.decode!()
 
-    Encoder.decode(event, store_data, %{})
+    %{
+      event: Encoder.decode(event, store_data, %{}),
+      metadata: metadata,
+      type: Codec.serialize_type(type),
+      tags: tags
+    }
   end
-
-  defp serialized(event), do: event
 
   def run_ok(%Reactor{} = reactor, given, expected) do
     for entry <- given do

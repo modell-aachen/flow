@@ -171,6 +171,6 @@ Both `Ariadne.Flow.Projection` and `Ariadne.Flow.Composite` implement the `Ariad
 ```
 
 - `reduce/2` folds a list of events into the reducer's result.
-- `query/1` returns a list of query items describing which events the reducer needs. For a projection this is just its filter; for a composite it is the union of its children's queries.
+- `query/1` returns a list of query items describing which events the reducer needs. For a projection this is just its filter; for a composite it is the union of its children's queries. `Ariadne.Flow.Store.read/3` normalises it once, and the read it returns is what both the result and the append condition of a dispatch are built from.
 
 This shared behaviour is what lets the rest of `Ariadne.Flow` treat projections and composites uniformly.

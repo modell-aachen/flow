@@ -116,6 +116,23 @@ defmodule Ariadne.Flow.StoreTest do
              } = Store.read(store)
     end
 
+    test "reads into a Read carrying the normalised query and the last position seen",
+         %{store: store} do
+      Store.append(store, [
+        %Event{type: "PageCreated", data: %{}, tags: []},
+        %Event{type: "PageCreated", data: %{}, tags: []}
+      ])
+
+      assert %Store.Read{
+               query: [%Ariadne.Flow.Query.Item{types: ["PageCreated"]}],
+               events: [_, %{position: last_position}],
+               last_position: last_position
+             } = Store.read(store, [%{types: ["PageCreated"]}, %{types: ["PageCreated"]}])
+
+      assert %Store.Read{query: :all, events: [_, _]} = Store.read(store)
+      assert %Store.Read{query: [], events: [], last_position: 0} = Store.read(store, [])
+    end
+
     test "queries events without query items", %{store: store} do
       Store.append(store, [
         %Event{type: "PageCreated", data: %{}, tags: []},

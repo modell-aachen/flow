@@ -11,6 +11,7 @@ defmodule Ariadne.Flow.Store do
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store.AppendCondition
   alias Ariadne.Flow.Store.Backend
+  alias Ariadne.Flow.Store.Read
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @enforce_keys [:module, :config]
@@ -18,6 +19,11 @@ defmodule Ariadne.Flow.Store do
 
   @type t :: %__MODULE__{module: module(), config: Backend.config()}
 
+  @doc """
+  Reads the events matching `query` and returns them as an `Ariadne.Flow.Store.Read` —
+  the events together with the normalised query that selected them, so a dispatch
+  normalises its query once and builds its append condition from the same read.
+  """
   def read(%__MODULE__{module: module, config: config}, query \\ :all, opts \\ []) do
     query = Query.new(query)
     base_metadata = telemetry_metadata(module, config)
@@ -26,9 +32,10 @@ defmodule Ariadne.Flow.Store do
       [:ariadne, :flow, :store, :read],
       base_metadata,
       fn ->
-        result = module.read(config, query, opts)
+        %{events: events} = module.read(config, query, opts)
 
-        {result, %{event_count: length(result.events)}, Map.put(base_metadata, :query, query)}
+        {Read.new(query, events), %{event_count: length(events)},
+         Map.put(base_metadata, :query, query)}
       end
     )
   end
