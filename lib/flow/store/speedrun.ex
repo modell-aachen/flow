@@ -23,12 +23,12 @@ defmodule Ariadne.Flow.Store.Speedrun do
       |> Stream.take(events_to_fill_count)
       |> Stream.chunk_every(1_000)
       |> Stream.chunk_every(10)
-      |> Stream.each(&append_chunks_in_parallel(&1, store, module, adapter, progress_fn))
+      |> Stream.each(&append_chunks_in_parallel(&1, store, module, progress_fn))
       |> Stream.run()
     end
   end
 
-  defp append_chunks_in_parallel(chunks, store, module, adapter, progress_fn) do
+  defp append_chunks_in_parallel(chunks, store, module, progress_fn) do
     chunks
     |> Enum.map(fn chunk -> Task.async(fn -> Store.append(store, chunk) end) end)
     |> Task.await_many(60_000)
