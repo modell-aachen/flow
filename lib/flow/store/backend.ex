@@ -1,39 +1,5 @@
 defmodule Ariadne.Flow.Store.Backend do
-  @moduledoc """
-  The contract every store backend implements.
-
-  A store is a `t:Ariadne.Flow.Store.t/0` — a backend module paired with the config
-  that module needs. `Ariadne.Flow.Store` keeps no state of its own; every call it
-  takes it dispatches to `module.callback(config, ...)`. Flow ships two backends:
-  `Ariadne.Flow.Store.Postgres` and `Ariadne.Flow.Store.InMemory`.
-
-  Callers never invoke these callbacks directly. `Ariadne.Flow.Store` normalises the
-  arguments first — the query through `Ariadne.Flow.Query.new/1`, the append condition
-  through `Ariadne.Flow.Store.AppendCondition.new/1` — so a backend always receives an
-  optimised `t:Ariadne.Flow.Query.t/0` struct and an
-  `t:Ariadne.Flow.Store.AppendCondition.t/0` struct rather than the raw lists and maps
-  a caller wrote. `Ariadne.Flow.Store` also wraps
-  `c:read/3` and `c:append/3` in telemetry spans. A backend implements storage, not
-  validation and not instrumentation.
-
-  ## What a backend guarantees
-
-  * **Total order.** Every appended event gets a `position` higher than every position
-    already in the store, and every read returns events in ascending position order.
-  * **Atomic conditional append.** When `c:append/3` gets a `:condition`, no concurrent
-    append may slip an event matching it in between the check and the write.
-  * **Isolation.** Stores built from different configs — the Postgres backend's
-    `:prefix` and `:context` — share neither events nor reactor checkpoints.
-  * **Checkpoints per reactor.** `c:consume/2` records how far a reactor got under that
-    reactor's name, and the next call against the same config resumes there.
-
-  ## Implementing one
-
-  `Ariadne.Flow.Store.InMemory` is the reference implementation: it is small enough to
-  read in one sitting and covers the whole contract. `Ariadne.Flow.StoreTest` is the
-  conformance suite — it is parameterised over the backends and every case in it holds
-  for any implementation.
-  """
+  @moduledoc false
   alias Ariadne.Flow.ConsumeResult
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store

@@ -1,19 +1,5 @@
 defmodule Ariadne.Flow.Store.SlowOperationLogger do
-  @moduledoc """
-  Logs flow store read and append operations whose duration exceeds a threshold
-  at `info` level, attaching the operation details as structured `flow.*` log
-  attributes.
-
-  Attaches to the `[:ariadne, :flow, :store, :read | :append, :stop]` telemetry
-  spans emitted by `Ariadne.Flow.Store`. Thresholds (in milliseconds) default to
-  20ms for reads and 100ms for appends and can be overridden via config:
-
-      config :flow, :flow_store_slow_thresholds, read: 50, append: 200
-
-  Logging is enabled by default and can be turned off (e.g. in tests):
-
-      config :flow, :flow_store_slow_logging, false
-  """
+  @moduledoc false
   require Logger
 
   @handler_id "modac-flow-store-slow-operations"

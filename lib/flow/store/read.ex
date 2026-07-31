@@ -1,12 +1,5 @@
 defmodule Ariadne.Flow.Store.Read do
-  @moduledoc """
-  What one `Ariadne.Flow.Store.read/3` saw: the events, the normalised query that
-  selected them, and the position of the last event seen.
-
-  A read is the unit a dispatch's consistency is built from —
-  `Ariadne.Flow.Store.AppendCondition.for_read/1` turns it into the condition that makes
-  a write conflict with anything the read missed.
-  """
+  @moduledoc false
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store.SequencedEvent
 

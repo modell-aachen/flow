@@ -1,14 +1,5 @@
 defmodule Ariadne.Flow.Store.Postgres do
-  @moduledoc """
-  The store Flow ships for production use: events in Postgres, ordered by a global
-  `bigserial` position.
-
-  It implements `Ariadne.Flow.Store.Backend`, and its own struct — repo, schema prefix
-  and context — is the config the callbacks receive.
-  `Ariadne.Flow.Store.Postgres.Migration` defines the tables it needs; `init/1` takes
-  the repo, schema prefix and context to reach them. See [the store guide](store.html)
-  for both.
-  """
+  @moduledoc false
   @behaviour Ariadne.Flow.Store.Backend
 
   import Ecto.Query

@@ -1,13 +1,5 @@
 defmodule Ariadne.Flow.Store do
-  @moduledoc """
-  A store: a backend module paired with the config that backend needs.
-
-  Every function here dispatches to the backend and adds what is the same for all of
-  them — query and append condition normalisation, telemetry spans. What a backend has
-  to provide in return is `Ariadne.Flow.Store.Backend`. Build a store with the
-  backend's own `init/1`, `Ariadne.Flow.Store.Postgres.init/1` for the store Flow ships
-  for production use.
-  """
+  @moduledoc false
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store.AppendCondition
   alias Ariadne.Flow.Store.Backend

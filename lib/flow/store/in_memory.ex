@@ -1,13 +1,5 @@
 defmodule Ariadne.Flow.Store.InMemory do
-  @moduledoc """
-  A store that keeps its events in an Agent, for tests and for anything that wants a
-  store without a database behind it.
-
-  It is the reference implementation of `Ariadne.Flow.Store.Backend` — short enough to
-  read whole, and the place to look when writing a backend of your own. The one thing
-  it does not do is travel: `dump/1` returns the agent, so a dumped store loads back
-  only on the node that built it.
-  """
+  @moduledoc false
   @behaviour Ariadne.Flow.Store.Backend
 
   alias Ariadne.Flow.Store
