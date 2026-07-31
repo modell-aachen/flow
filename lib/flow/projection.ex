@@ -13,7 +13,7 @@ defmodule Ariadne.Flow.Projection do
   def reduce(%__MODULE__{state: state, filter: filter, handler: handler}, events) do
     events
     |> Enum.filter(&matches_query_item?(&1, filter))
-    |> take_last(filter)
+    |> Query.Item.take_last(filter)
     |> Enum.reduce(state, &build_state(&1, &2, handler))
   end
 
@@ -21,9 +21,6 @@ defmodule Ariadne.Flow.Projection do
     %{tags: tags} = Store.Event.Encoder.encode(event)
     Query.Item.matches?(filter, %{type: type, tags: tags})
   end
-
-  defp take_last(events, %Query.Item{only_last_event: true}), do: Enum.take(events, -1)
-  defp take_last(events, %Query.Item{only_last_event: false}), do: events
 
   defp build_state(%{event: event, metadata: metadata}, state, handler) do
     handler.(state, event, metadata)

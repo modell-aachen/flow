@@ -21,6 +21,23 @@ defmodule Ariadne.Flow.QueryTest do
              Query.new([%{types: ["TestEvent"], only_last_event: true}])
   end
 
+  test "Query items take an unset only_last_event for wanting every match" do
+    assert %Query.Item{only_last_event: false} =
+             Query.Item.new(%{types: ["TestEvent"], only_last_event: nil})
+
+    assert [%Query.Item{only_last_event: false}] =
+             Query.new([%{types: ["TestEvent"], only_last_event: nil}])
+  end
+
+  test "Query items narrow a list of matches to the last one only when asked to" do
+    every_match = Query.Item.new(%{types: ["TestEvent"]})
+    last_match = Query.Item.new(%{types: ["TestEvent"], only_last_event: true})
+
+    assert [:first, :second] == Query.Item.take_last([:first, :second], every_match)
+    assert [:second] == Query.Item.take_last([:first, :second], last_match)
+    assert [] == Query.Item.take_last([], last_match)
+  end
+
   test "Query items are validated" do
     assert_raise RuntimeError, fn -> Query.new([%{types: []}]) end
     assert_raise RuntimeError, fn -> Query.new([%{tags: ["test_tag"]}]) end

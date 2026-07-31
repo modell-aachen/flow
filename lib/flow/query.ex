@@ -21,13 +21,21 @@ defmodule Ariadne.Flow.Query do
       %__MODULE__{
         types: item.types,
         tags: Map.get(item, :tags),
-        only_last_event: Map.get(item, :only_last_event, false)
+        only_last_event: only_last_event?(item)
       }
     end
 
     def matches?(%{types: types, tags: tags}, %{type: _, tags: _} = event) do
       matches_types?(types, event) and matches_tags?(tags, event)
     end
+
+    def take_last(events, %__MODULE__{only_last_event: true}), do: Enum.take(events, -1)
+    def take_last(events, %__MODULE__{only_last_event: false}), do: events
+
+    defp only_last_event?(%{only_last_event: only_last_event}) when is_boolean(only_last_event),
+      do: only_last_event
+
+    defp only_last_event?(_item), do: false
 
     defp matches_types?(types, %{type: type}), do: type in types
 

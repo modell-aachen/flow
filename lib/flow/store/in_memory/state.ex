@@ -110,13 +110,8 @@ defmodule Ariadne.Flow.Store.InMemory.State do
   defp select(sequenced_events, %Query.Item{} = item) do
     sequenced_events
     |> Enum.filter(&Query.Item.matches?(item, &1.event))
-    |> take_last(item)
+    |> Query.Item.take_last(item)
   end
-
-  defp take_last(sequenced_events, %Query.Item{only_last_event: true}),
-    do: Enum.take(sequenced_events, -1)
-
-  defp take_last(sequenced_events, %Query.Item{only_last_event: false}), do: sequenced_events
 
   defp append_events(state, events, opts) do
     created_at = Keyword.get(opts, :created_at, DateTime.utc_now())
