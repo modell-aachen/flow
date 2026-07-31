@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/modell-aachen/flow/compare/flow-v0.1.0...flow-v0.2.0) (2026-07-31)
+## [0.2.0](https://github.com/modell-aachen/flow/compare/v0.1.0...v0.2.0) (2026-07-31)
 
 
 ### ⚠ BREAKING CHANGES
