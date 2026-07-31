@@ -56,7 +56,7 @@ A projection consists of the following essential parts:
 
 ### Reducing the last event only
 
-A filter can also carry `only_last_event: true`. The filter then matches as it otherwise would, but of all the events it matches only the last one — the one appended most recently — reaches the handler:
+A filter can also carry `only_last_event: true`. The filter then matches as it otherwise would, but of all the events it matches only the last one — the one appended most recently — reaches the handler. One event in total, not one per listed type: the filter below yields the newest of the `CourseDefined` and `CourseCapacityChanged` events together, which is what makes it a capacity.
 
 ```elixir
 def current_capacity(course_id) do
@@ -75,7 +75,9 @@ def current_capacity(course_id) do
 end
 ```
 
-This is the same result as `course_capacity/1` above, reached without reading the capacity changes that have since been superseded. Use it where the state is decided by the newest matching event alone; a projection that counts, sums or otherwise accumulates needs every event and must leave the option out.
+This is the same result as `course_capacity/1` above, reached without the superseded capacity changes travelling out of the store and through the reducer. Use it where the state is decided by the newest matching event alone; a projection that counts, sums or otherwise accumulates needs every event and must leave the option out.
+
+What the option saves for certain is rows fetched and reduced, not necessarily rows scanned. The Postgres store puts the selection inside the item's own query as an `ORDER BY position DESC LIMIT 1`, which for a filter without `tags` is a backward walk of the position index that stops at the first hit. A tag-restricted filter joins the tag table and aggregates per position to enforce its AND-semantics, so whether the database can stop at the first group is the query planner's decision rather than a guarantee.
 
 `only_last_event` applies per filter, not per query. Each filter of a composite picks the last of *its own* matches, so `%{types: [CourseCapacityChanged], only_last_event: true}` and `%{types: [StudentSubscribedToCourse], only_last_event: true}` in one composite yield one event each, and a filter without the option beside them still sees all of its matches.
 
