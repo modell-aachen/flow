@@ -1,7 +1,17 @@
 defmodule Ariadne.Flow.Query.Optimizer do
   alias Ariadne.Flow.Query.Item
 
+  # Every rewrite below rests on a broader item covering a narrower one's events, which
+  # only holds while an item wants all of its matches: the last CourseDefined tagged
+  # "course:42" is not the last CourseDefined, so merging the two would lose an event.
+  # only_last_event items are therefore passed through, deduplicated and nothing more.
   def optimize(query) do
+    {only_last_event, all_events} = Enum.split_with(query, & &1.only_last_event)
+
+    optimize_all_events(all_events) ++ Enum.uniq(only_last_event)
+  end
+
+  defp optimize_all_events(query) do
     query
     |> expand_to_type_constraint_pairs()
     |> minimize_constraints_per_type()

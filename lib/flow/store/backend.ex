@@ -80,6 +80,11 @@ defmodule Ariadne.Flow.Store.Backend do
   @doc """
   Returns the events matching `query`, in ascending position order.
 
+  A query is the union of its items, each item contributing its own matches. An item
+  with `only_last_event: true` contributes one event at most — the highest-positioned
+  one matching it, of those the read covers, so `:after` narrows what "last" means and
+  `:limit` cuts the union that selection is part of.
+
   Both options in `t:read_opts/0` apply to every query, `:all` included.
   """
   @callback read(config(), Query.t(), read_opts()) :: read_result()

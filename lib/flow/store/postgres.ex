@@ -294,17 +294,32 @@ defmodule Ariadne.Flow.Store.Postgres do
     }
   end
 
-  defp to_ecto_query(query_items, %{
-         after_position: after_position,
-         context: context,
-         limit: limit
-       }) do
+  defp to_ecto_query(query_items, %{limit: limit} = opts) do
     query_items
-    |> Enum.map(&build_individual_query/1)
-    |> Enum.map(&where(&1, [e], e.position > ^after_position))
-    |> Enum.map(&where(&1, [e], e.context == ^context))
+    |> Enum.map(&build_item_query(&1, opts))
     |> combine_with_union()
     |> apply_limit(limit)
+  end
+
+  defp build_item_query(item, %{after_position: after_position, context: context}) do
+    item
+    |> build_individual_query()
+    |> where([e], e.position > ^after_position)
+    |> where([e], e.context == ^context)
+    |> restrict_to_last_event(item)
+  end
+
+  # The union operands are subqueries, so the item's own ordering and limit stay inside
+  # it and pick the last event of that item rather than of the whole query.
+  defp restrict_to_last_event(query, %{only_last_event: false}), do: query
+
+  defp restrict_to_last_event(query, %{only_last_event: true}) do
+    last_event =
+      query
+      |> order_by([e], desc: e.position)
+      |> limit(1)
+
+    from(e in subquery(last_event))
   end
 
   defp build_individual_query(%{types: types, tags: nil}) do

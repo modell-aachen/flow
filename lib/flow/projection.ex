@@ -13,6 +13,7 @@ defmodule Ariadne.Flow.Projection do
   def reduce(%__MODULE__{state: state, filter: filter, handler: handler}, events) do
     events
     |> Enum.filter(&matches_query_item?(&1, filter))
+    |> Query.select_last(filter)
     |> Enum.reduce(state, &build_state(&1, &2, handler))
   end
 

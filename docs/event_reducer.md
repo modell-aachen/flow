@@ -54,6 +54,33 @@ A projection consists of the following essential parts:
 
 `types` is required and must be a non-empty list. `tags` is optional — omit it to match every event of the listed types regardless of tags.
 
+### Reducing the last event only
+
+A filter can also carry `only_last_event: true`. The filter then matches as it otherwise would, but of all the events it matches only the last one — the one appended most recently — reaches the handler:
+
+```elixir
+def current_capacity(course_id) do
+  Projection.new(%{
+    filter: %{
+      types: [CourseDefined, CourseCapacityChanged],
+      tags: ["course:#{course_id}"],
+      only_last_event: true
+    },
+    initial_state: 0,
+    handler: fn
+      _state, %CourseDefined{capacity: capacity}, _metadata -> capacity
+      _state, %CourseCapacityChanged{new_capacity: new}, _metadata -> new
+    end
+  })
+end
+```
+
+This is the same result as `course_capacity/1` above, reached without reading the capacity changes that have since been superseded. Use it where the state is decided by the newest matching event alone; a projection that counts, sums or otherwise accumulates needs every event and must leave the option out.
+
+`only_last_event` applies per filter, not per query. Each filter of a composite picks the last of *its own* matches, so `%{types: [CourseCapacityChanged], only_last_event: true}` and `%{types: [StudentSubscribedToCourse], only_last_event: true}` in one composite yield one event each, and a filter without the option beside them still sees all of its matches.
+
+A reducer's query is also what its command's append condition is built from ([Concurrency](application.html#concurrency)), and there the option changes nothing: an event matching the filter has appeared since the read exactly when the last matching event has. A command reducing `current_capacity/1` conflicts on the same events as one reducing `course_capacity/1`.
+
 The projection above is tied to course 42. To make it reusable for any course, wrap the construction in a function:
 
 ```elixir

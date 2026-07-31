@@ -27,4 +27,31 @@ defmodule Ariadne.Flow.QueryTest do
                %{types: ["TestEvent6"], tags: ["test_tag2"]}
              ])
   end
+
+  test "Query items want every match unless they ask for only the last event" do
+    assert [%Query.Item{only_last_event: false}] = Query.new([%{types: ["TestEvent"]}])
+
+    assert [%Query.Item{only_last_event: true}] =
+             Query.new([%{types: ["TestEvent"], only_last_event: true}])
+
+    assert_raise RuntimeError, fn ->
+      Query.new([%{types: ["TestEvent"], only_last_event: "yes"}])
+    end
+  end
+
+  test "Items asking for only the last event are deduplicated but never merged" do
+    assert [
+             %{types: ["TestEvent"], tags: nil, only_last_event: false},
+             %{types: ["TestEvent"], tags: nil, only_last_event: true},
+             %{types: ["TestEvent"], tags: ["test_tag"], only_last_event: true},
+             %{types: ["TestEvent2"], tags: nil, only_last_event: true}
+           ] =
+             Query.new([
+               %{types: ["TestEvent"], only_last_event: true},
+               %{types: ["TestEvent"], only_last_event: true},
+               %{types: ["TestEvent"], tags: ["test_tag"], only_last_event: true},
+               %{types: ["TestEvent2"], only_last_event: true},
+               %{types: ["TestEvent"]}
+             ])
+  end
 end

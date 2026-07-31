@@ -130,6 +130,8 @@ application =
 
 The `name` is what the checkpoint is keyed on, so it must be stable across versions. The `reactor/0` convention is part of the public contract: the module name is all that identifies a reactor, which lets a reactor run be serialised and handed to an execution backend.
 
+The `filter` is a query item like a projection's, with one exception: a reactor reacts to every event it matches, so it cannot ask for [`only_last_event`](event_reducer.html#reducing-the-last-event-only) — the events it skipped would be checkpointed past and never delivered. `Reactor.new/2` raises on such a filter.
+
 A reactor may declare whether it is meant to run **synchronously** or **asynchronously**. Passing `sync: true` marks it synchronous; the default is asynchronous. The engine honors this intent: a synchronous reactor runs inline as part of the dispatch, so its failure fails the dispatch, while an asynchronous reactor may be deferred onto a job system.
 
 ```elixir

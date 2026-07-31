@@ -185,6 +185,101 @@ defmodule Ariadne.Flow.StoreTest do
              } = Store.read(store, [%{types: ["PageCreated"], tags: ["page:Page 2"]}])
     end
 
+    test "reads only the last event matching an item that asks for it", %{store: store} do
+      append!(store, "ItemAdded")
+
+      {:ok, %{events: [%SequencedEvent{position: last_added}]}} =
+        Store.append(
+          store,
+          %Event{type: "ItemAdded", data: %{"title" => "Item 2"}, tags: ["item:2"]},
+          created_at: @created_at,
+          metadata: %{"user_id" => "user-123"}
+        )
+
+      removed = append_position!(store, "ItemRemoved")
+
+      assert %{
+               events: [
+                 %SequencedEvent{
+                   event: %Event{
+                     type: "ItemAdded",
+                     data: %{"title" => "Item 2"},
+                     tags: ["item:2"]
+                   },
+                   position: ^last_added,
+                   created_at: @created_at,
+                   metadata: %{"user_id" => "user-123"}
+                 }
+               ]
+             } = Store.read(store, [%{types: ["ItemAdded"], only_last_event: true}])
+
+      assert %{events: []} =
+               Store.read(store, [%{types: ["ItemRenamed"], only_last_event: true}])
+
+      assert %{events: [%{position: ^last_added}, %{position: ^removed}]} =
+               Store.read(store, [
+                 %{types: ["ItemAdded"], only_last_event: true},
+                 %{types: ["ItemRemoved"], only_last_event: true}
+               ])
+    end
+
+    test "reads the last event of each item, not of the query", %{store: store} do
+      tagged = append_position!(store, "ItemAdded", ["item:1"])
+      untagged = append_position!(store, "ItemAdded")
+
+      assert %{events: [%{position: ^tagged}, %{position: ^untagged}]} =
+               Store.read(store, [
+                 %{types: ["ItemAdded"], tags: ["item:1"], only_last_event: true},
+                 %{types: ["ItemAdded"], only_last_event: true}
+               ])
+    end
+
+    test "reads every match of the items beside one that asks for its last event only",
+         %{store: store} do
+      first_added = append_position!(store, "ItemAdded")
+      second_added = append_position!(store, "ItemAdded")
+      append!(store, "ItemRemoved")
+      last_removed = append_position!(store, "ItemRemoved")
+
+      assert %{
+               events: [
+                 %{position: ^first_added},
+                 %{position: ^second_added},
+                 %{position: ^last_removed}
+               ]
+             } =
+               Store.read(store, [
+                 %{types: ["ItemAdded"]},
+                 %{types: ["ItemRemoved"], only_last_event: true}
+               ])
+    end
+
+    test "reads the last event after the position read after", %{store: store} do
+      first = append_position!(store, "ItemAdded")
+      second = append_position!(store, "ItemAdded")
+
+      only_last = [%{types: ["ItemAdded"], only_last_event: true}]
+
+      assert %{events: [%{position: ^second}]} = Store.read(store, only_last, after: first)
+      assert %{events: []} = Store.read(store, only_last, after: second)
+    end
+
+    test "fails an append condition on an item that asks for its last event only",
+         %{store: store} do
+      condition = %{fail_if_events_match: [%{types: ["ItemAdded"], only_last_event: true}]}
+      first = append_position!(store, "ItemAdded")
+
+      assert {:error, :append_condition_failed} ==
+               Store.append(store, %Event{type: "ItemAdded", data: %{}, tags: []},
+                 condition: condition
+               )
+
+      assert {:ok, _} =
+               Store.append(store, %Event{type: "ItemAdded", data: %{}, tags: []},
+                 condition: Map.put(condition, :after, first)
+               )
+    end
+
     test "skips events up to the position read after", %{store: store} do
       first = append_position!(store, "ItemAdded")
       second = append_position!(store, "ItemAdded")
@@ -659,8 +754,8 @@ defmodule Ariadne.Flow.StoreTest do
     Store.append(store, [%Event{type: type, data: %{}, tags: tags}])
   end
 
-  defp append_position!(store, type) do
-    {:ok, %{events: [%SequencedEvent{position: position}]}} = append!(store, type)
+  defp append_position!(store, type, tags \\ []) do
+    {:ok, %{events: [%SequencedEvent{position: position}]}} = append!(store, type, tags)
     position
   end
 

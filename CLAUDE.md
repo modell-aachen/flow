@@ -58,7 +58,7 @@ Commit subjects must be Conventional Commits — work lands directly on `main`, 
 
 **Reactors are configured as modules exporting `reactor/0`** because `ReactorRun` — reactor module, resume position, dispatch metadata — has to survive `dump/1` → job system → `load/1`. That serialisation boundary is why the module name, not the struct, is the identity.
 
-**`Query.new/1` always optimises** (`query/optimizer.ex`): it drops tag-supersets, collapses types sharing a tag constraint, and lets an unrestricted item absorb tag-restricted ones for the same type. Read `query_test.ex` for the expected shape.
+**`Query.new/1` always optimises** (`query/optimizer.ex`): it drops tag-supersets, collapses types sharing a tag constraint, and lets an unrestricted item absorb tag-restricted ones for the same type. Items with `only_last_event: true` are exempt from all of it — every rewrite assumes a broader item covers a narrower one's events, which stops holding once only the last of them is read — so they are deduplicated and otherwise passed through. Read `query_test.ex` for the expected shape.
 
 **Postgres store** (`store/postgres/query.ex`): `position` is a global `bigserial` giving total order. Tags live in a side table, so AND-semantics come from a join plus `group_by(position)` / `having(count(tag) == length(tags))`; multi-item queries become unioned subqueries ordered by position. Appends serialise on a per-`(prefix, context)` `pg_advisory_xact_lock` and reactor consumption on a per-`(prefix, context, name)` one, with keys derived by `advisory_lock_key/1` from length-prefixed parts so distinct part lists cannot collide.
 

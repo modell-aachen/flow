@@ -70,6 +70,34 @@ defmodule Ariadne.Flow.ProjectionTest do
              )
   end
 
+  test "Projection projects the last matching event only when its filter asks for it" do
+    projection =
+      Projection.new(
+        %{
+          initial_state: 0,
+          filter: %{
+            types: [ExampleEvent],
+            only_last_event: true
+          }
+        },
+        fn state, %ExampleEvent{count: count}, _metadata -> state + count end
+      )
+
+    assert 0 == Projection.reduce(projection, [])
+
+    assert 2 ==
+             Projection.reduce(
+               projection,
+               given([%ExampleEvent{count: 1}, %ExampleEvent{count: 2}])
+             )
+
+    assert 1 ==
+             Projection.reduce(
+               projection,
+               given([%ExampleEvent{count: 1}, %ExampleEvent2{}])
+             )
+  end
+
   test "Projection projects events with metadata to state" do
     projection =
       Projection.new(

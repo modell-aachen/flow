@@ -18,6 +18,13 @@ defmodule Ariadne.Flow.EventReducerTest do
     )
   end
 
+  defp last_count_projection do
+    Projection.new(
+      %{initial_state: 0, filter: %{types: [CountEvent], only_last_event: true}},
+      fn _state, %CountEvent{count: count}, _ -> count end
+    )
+  end
+
   defp count_event(count) do
     %Store.Event{
       type: "Ariadne.Flow.EventReducerTest.CountEvent",
@@ -47,6 +54,18 @@ defmodule Ariadne.Flow.EventReducerTest do
                query: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}],
                events: [%Store.SequencedEvent{position: 1}]
              } = EventReducer.evaluate(num_counts_projection(), store)
+    end
+
+    test "reads the last matching event only when the reducer's query asks for it" do
+      store = Store.InMemory.init()
+      append(store, 1)
+      append(store, 2)
+
+      assert %{
+               result: 2,
+               query: [%{only_last_event: true}],
+               events: [%Store.SequencedEvent{position: 2}]
+             } = EventReducer.evaluate(last_count_projection(), store)
     end
 
     test "returns the result of an empty event stream" do
