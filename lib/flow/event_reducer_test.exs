@@ -46,39 +46,31 @@ defmodule Ariadne.Flow.EventReducerTest do
     end
   end
 
-  describe "evaluate_for_append/2" do
-    test "folds the query's matching events into the reducer's result" do
+  describe "read/2" do
+    test "returns the reducer's serialized query and the events matching it" do
+      store = Store.InMemory.init()
+      append(store, 1)
+
+      assert {[%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}],
+              [%Store.SequencedEvent{position: 1}]} =
+               EventReducer.read(num_counts_projection(), store)
+    end
+
+    test "returns no events when nothing matches the query" do
+      store = Store.InMemory.init()
+
+      assert {_query, []} = EventReducer.read(num_counts_projection(), store)
+    end
+  end
+
+  describe "fold/2" do
+    test "folds read events into the reducer's result" do
       store = Store.InMemory.init()
       append(store, 1)
       append(store, 2)
+      {_query, sequenced_events} = EventReducer.read(num_counts_projection(), store)
 
-      assert {2, _append_condition} =
-               EventReducer.evaluate_for_append(num_counts_projection(), store)
-    end
-
-    test "returns an append condition scoping a later append to the folded events" do
-      store = Store.InMemory.init()
-      append(store, 1)
-
-      {_result, append_condition} =
-        EventReducer.evaluate_for_append(num_counts_projection(), store)
-
-      assert {:ok, _} = Store.append(store, [count_event(2)], condition: append_condition)
-
-      assert {:error, :append_condition_failed} =
-               Store.append(store, [count_event(3)], condition: append_condition)
-    end
-
-    test "returns an append condition scoping a later append when nothing was read" do
-      store = Store.InMemory.init()
-
-      {_result, append_condition} =
-        EventReducer.evaluate_for_append(num_counts_projection(), store)
-
-      assert {:ok, _} = Store.append(store, [count_event(1)], condition: append_condition)
-
-      assert {:error, :append_condition_failed} =
-               Store.append(store, [count_event(2)], condition: append_condition)
+      assert EventReducer.fold(num_counts_projection(), sequenced_events) == 2
     end
   end
 end
