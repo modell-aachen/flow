@@ -87,6 +87,22 @@ defmodule Ariadne.Flow.Query.OptimizerTest do
                ])
     end
 
+    test "drops items differing only in the order of their types and tags" do
+      assert [%{tags: ["other_tag", "test_tag"], only_last_event: true}] =
+               optimize([
+                 %{
+                   types: ["TestEvent", "OtherEvent"],
+                   tags: ["other_tag", "test_tag"],
+                   only_last_event: true
+                 },
+                 %{
+                   types: ["OtherEvent", "TestEvent"],
+                   tags: ["test_tag", "other_tag"],
+                   only_last_event: true
+                 }
+               ])
+    end
+
     test "keeps a tag superset, whose last event is not the subset's last event" do
       assert [
                %{types: ["TestEvent"], tags: ["test_tag"], only_last_event: true},

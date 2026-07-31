@@ -4,7 +4,13 @@ defmodule Ariadne.Flow.Query.Optimizer do
   def optimize(query) do
     {last_event_items, all_event_items} = Enum.split_with(query, & &1.only_last_event)
 
-    optimize_all_event_items(all_event_items) ++ Enum.uniq(last_event_items)
+    optimize_all_event_items(all_event_items) ++ dedupe_last_event_items(last_event_items)
+  end
+
+  defp dedupe_last_event_items(query) do
+    Enum.uniq_by(query, fn %Item{types: types, tags: tags} ->
+      {Enum.sort(types), tags && Enum.sort(tags)}
+    end)
   end
 
   defp optimize_all_event_items(query) do
