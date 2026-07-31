@@ -134,9 +134,15 @@ defmodule Ariadne.Flow.Store.Backend do
   @doc """
   Serialises the config so `c:load/1` can rebuild it.
 
-  A store travels this way whenever a reactor run is handed to a job system, so the
-  dumped form has to survive whatever that system stores it in — JSON-compatible data
-  for anything that leaves the node.
+  What comes back has to reach the same storage rather than a copy of it: events
+  appended through the loaded store are visible to the original, and the other way
+  round.
+
+  How far the dumped form travels is the backend's own property, not something this
+  contract fixes. `Ariadne.Flow.Store.Postgres` dumps a map of strings and survives
+  whatever a job system stores it in; `Ariadne.Flow.Store.InMemory` dumps its agent and
+  loads back only on the node that built it. An engine that hands a store to another
+  node is the one that needs a backend whose dumped form survives the trip.
   """
   @callback dump(config()) :: term()
 
