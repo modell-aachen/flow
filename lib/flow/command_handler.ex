@@ -7,9 +7,9 @@ defmodule Ariadne.Flow.CommandHandler do
   alias Ariadne.Flow.Store.Event.Encoder
 
   def handle(command, %Store{} = store, opts \\ []) do
-    {query, read_events} = EventReducer.read(command, store)
+    %{result: result, query: query, events: read_events} = EventReducer.evaluate(command, store)
 
-    with {:ok, events} <- EventReducer.fold(command, read_events) do
+    with {:ok, events} <- result do
       store_events = Enum.map(events, &serialize/1)
 
       append_opts =
