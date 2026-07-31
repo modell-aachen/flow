@@ -41,32 +41,30 @@ defmodule Ariadne.Flow.ReactorRun do
         %__MODULE__{reactor: reactor_module, start_after_position: position},
         %Store{} = store
       ) do
-    catch_up(store, %{reactor_module.reactor() | start_after_position: position})
-  end
+    reactor = reactor_module.reactor()
 
-  defp catch_up(store, %Reactor{} = reactor) do
-    case consume(store, reactor) do
-      %ConsumeResult{status: :error, last_position: position, failure: %{reason: reason}} ->
-        {:error, {:reactor_failed, %{name: reactor.name, position: position, reason: reason}}}
-
-      %ConsumeResult{more?: true} ->
-        catch_up(store, reactor)
-
-      %ConsumeResult{} ->
-        :ok
-    end
-  end
-
-  defp consume(store, %Reactor{} = reactor) do
     stored_event_reactor =
       StoredEventReactor.new(%{
         name: reactor.name,
         query: Reactor.query(reactor),
         handler: fn events -> run_handler(reactor, events) end,
-        start_after_position: reactor.start_after_position
+        start_after_position: position
       })
 
-    Store.consume(store, stored_event_reactor)
+    catch_up(store, stored_event_reactor)
+  end
+
+  defp catch_up(store, %StoredEventReactor{name: name} = stored_event_reactor) do
+    case Store.consume(store, stored_event_reactor) do
+      %ConsumeResult{status: :error, last_position: position, failure: %{reason: reason}} ->
+        {:error, {:reactor_failed, %{name: name, position: position, reason: reason}}}
+
+      %ConsumeResult{more?: true} ->
+        catch_up(store, stored_event_reactor)
+
+      %ConsumeResult{} ->
+        :ok
+    end
   end
 
   defp run_handler(reactor, events) do

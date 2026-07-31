@@ -45,7 +45,7 @@ defmodule Ariadne.Flow.Store do
   end
 
   def consume(%__MODULE__{module: module, config: config}, %StoredEventReactor{} = reactor) do
-    module.consume(config, reactor)
+    module.consume(config, %{reactor | query: Query.new(reactor.query)})
   end
 
   def transaction(%__MODULE__{module: module, config: config}, fun) when is_function(fun, 0) do
