@@ -67,6 +67,7 @@ The transaction also joins an ambient one — its own `transaction/2`, or, with 
 | `init/1` | builds the store — the one backend function callers name directly |
 | `read/3` | returns the events matching a query, in position order |
 | `append/3` | writes events atomically, honouring the append condition it was given |
+| `count/1` | how many events the store holds, over the scope an `:all` read covers |
 | `consume/2` | hands a reactor its next batch of events and records how far it got |
 | `transaction/2` | runs a function, rolling its writes back if it raises |
 | `telemetry_metadata/1` | the metadata that identifies this storage on store telemetry |

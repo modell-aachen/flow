@@ -163,6 +163,13 @@ defmodule Ariadne.Flow.Store.Postgres do
     do: append(config, [event], opts)
 
   @impl Backend
+  def count(%__MODULE__{repo: repo, prefix: prefix, context: context}) do
+    EctoEvent
+    |> where([e], e.context == ^context)
+    |> repo.aggregate(:count, prefix: prefix)
+  end
+
+  @impl Backend
   def consume(%__MODULE__{repo: repo} = config, %StoredEventReactor{
         name: name,
         query: query,
@@ -211,18 +218,6 @@ defmodule Ariadne.Flow.Store.Postgres do
   @impl Backend
   def load(%{"repo" => repo, "prefix" => prefix, "context" => context}) do
     %__MODULE__{repo: String.to_existing_atom(repo), prefix: prefix, context: context}
-  end
-
-  @doc """
-  Counts every event the store's context holds. Not part of the backend contract.
-  """
-  def total_events(%Store{
-        module: __MODULE__,
-        config: %__MODULE__{repo: repo, prefix: prefix, context: context}
-      }) do
-    EctoEvent
-    |> where([e], e.context == ^context)
-    |> repo.aggregate(:count, prefix: prefix)
   end
 
   @doc false

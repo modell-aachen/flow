@@ -24,6 +24,8 @@ defmodule Ariadne.Flow.Store.InMemory.State do
     %{events: events}
   end
 
+  def count(%__MODULE__{events: events}), do: length(events)
+
   def append(%__MODULE__{} = state, events, opts) when is_list(events) and is_list(opts) do
     append_condition = Keyword.get(opts, :condition)
 

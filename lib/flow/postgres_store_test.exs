@@ -23,17 +23,6 @@ defmodule Ariadne.Flow.PostgresStoreTest do
   end
 
   describe "The postgres event store" do
-    test "queries the number of total events", %{store: store} do
-      assert 0 == Store.Postgres.total_events(store)
-
-      Store.append(store, [
-        %Event{type: "SomeEvent", data: %{}, tags: []},
-        %Event{type: "SomeEvent", data: %{}, tags: []}
-      ])
-
-      assert 2 == Store.Postgres.total_events(store)
-    end
-
     test "reads all events ordered by position", %{store: store} do
       Store.append(store, [
         %Event{type: "First", data: %{}, tags: []},
@@ -59,7 +48,7 @@ defmodule Ariadne.Flow.PostgresStoreTest do
         %Event{type: "SomeContextStoreEvent", data: %{}, tags: []}
       ])
 
-      assert 2 == Store.Postgres.total_events(store)
+      assert 2 == Store.count(store)
 
       assert %{events: [%{event: %{type: "SomeEvent"}}, %{event: %{type: "SomeEvent"}}]} =
                Store.read(store)
@@ -67,7 +56,7 @@ defmodule Ariadne.Flow.PostgresStoreTest do
       assert %{events: [%{event: %{type: "SomeEvent"}}, %{event: %{type: "SomeEvent"}}]} =
                Store.read(store, [%{types: ["SomeEvent"]}])
 
-      assert 1 == Store.Postgres.total_events(context_store)
+      assert 1 == Store.count(context_store)
       assert %{events: [%{event: %{type: "SomeContextStoreEvent"}}]} = Store.read(context_store)
 
       assert %{events: [%{event: %{type: "SomeContextStoreEvent"}}]} =

@@ -13,7 +13,7 @@ defmodule Ariadne.Flow.Store.Speedrun do
 
   def fill_events(module, adapter, progress_fn) do
     store = adapter.start_store()
-    initial_events_count = adapter.total_events(store)
+    initial_events_count = Store.count(store)
     events_to_fill_count = module.initial_events_count() - initial_events_count
 
     if events_to_fill_count <= 0 do
@@ -33,7 +33,7 @@ defmodule Ariadne.Flow.Store.Speedrun do
     |> Enum.map(fn chunk -> Task.async(fn -> Store.append(store, chunk) end) end)
     |> Task.await_many(60_000)
 
-    events_count = adapter.total_events(store)
+    events_count = Store.count(store)
 
     progress = Float.round(events_count / module.initial_events_count() * 100, 2)
 

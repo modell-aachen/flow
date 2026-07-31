@@ -9,8 +9,4 @@ defmodule Ariadne.Flow.Store.Postgres.SpeedrunAdapter do
   def start_store do
     Postgres.init(repo: Speedrun.Repo)
   end
-
-  def total_events(store) do
-    Postgres.total_events(store)
-  end
 end

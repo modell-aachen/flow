@@ -32,6 +32,17 @@ defmodule Ariadne.Flow.StoreTest do
       assert %{events: []} = Store.read(store)
     end
 
+    test "counts the events it holds", %{store: store} do
+      assert 0 == Store.count(store)
+
+      Store.append(store, [
+        %Event{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
+        %Event{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []}
+      ])
+
+      assert 2 == Store.count(store)
+    end
+
     test "appends events and reads all", %{store: store} do
       Store.append(
         store,

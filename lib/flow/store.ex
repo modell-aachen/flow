@@ -33,6 +33,10 @@ defmodule Ariadne.Flow.Store do
     )
   end
 
+  def count(%__MODULE__{module: module, config: config}) do
+    module.count(config)
+  end
+
   def consume(%__MODULE__{module: module, config: config}, %StoredEventReactor{} = reactor) do
     module.consume(config, reactor)
   end

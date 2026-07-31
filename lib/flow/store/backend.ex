@@ -95,6 +95,14 @@ defmodule Ariadne.Flow.Store.Backend do
               {:ok, read_result()} | {:error, :append_condition_failed}
 
   @doc """
+  Returns how many events the store holds.
+
+  Counted over the same scope a `:all` read covers — the config's isolation scope, not
+  the whole storage.
+  """
+  @callback count(config()) :: non_neg_integer()
+
+  @doc """
   Hands the reactor its next batch of unconsumed events and records how far it got.
 
   Where the batch starts is the reactor's stored checkpoint, or its

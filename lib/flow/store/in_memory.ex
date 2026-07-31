@@ -45,6 +45,11 @@ defmodule Ariadne.Flow.Store.InMemory do
   end
 
   @impl Backend
+  def count(agent) do
+    Agent.get(agent, &State.count/1)
+  end
+
+  @impl Backend
   def consume(agent, %StoredEventReactor{} = reactor) do
     Agent.get_and_update(agent, fn state ->
       {new_state, result} = State.consume(state, reactor, @batch_size)
