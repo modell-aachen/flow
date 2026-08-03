@@ -4,5 +4,5 @@ defmodule Ariadne.Flow.ReactorEngine do
               reactor_run :: %Ariadne.Flow.ReactorRun{},
               store :: %Ariadne.Flow.Store{},
               opts :: keyword()
-            ) :: :ok | {:ok, %Ariadne.Flow.AfterCommit{}} | {:error, term()}
+            ) :: :ok | {:error, term()}
 end
