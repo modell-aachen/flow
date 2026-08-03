@@ -6,6 +6,7 @@ defmodule Ariadne.Flow.ReactionsTest do
   alias Ariadne.Flow.Projection
   alias Ariadne.Flow.Reactions
   alias Ariadne.Flow.ReactorEngine
+  alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
@@ -220,7 +221,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = inbox_store()
       events = append(store)
 
-      assert {:error, {:reactor_failed, %{name: "boom"}}} =
+      assert {:error, %ReactorError{name: "boom"}} =
                Reactions.react([BoomReactor, NeverReactor], store, events, %{}, @inline)
 
       refute_received {:got, "never", _, _}
@@ -230,7 +231,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = inbox_store()
       events = append(store)
 
-      assert {:error, {:reactor_failed, %{name: "boom", position: position, reason: :kaboom}}} =
+      assert {:error, %ReactorError{name: "boom", position: position, reason: :kaboom}} =
                Reactions.react([BoomReactor], store, events, %{}, @inline)
 
       assert is_integer(position)
@@ -260,7 +261,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = inbox_store()
       events = append(store)
 
-      assert {:error, {:reactor_failed, %{name: "boom-sync", reason: :kaboom}}} =
+      assert {:error, %ReactorError{name: "boom-sync", reason: :kaboom}} =
                Reactions.react(
                  [BoomSyncReactor, CountsReactor],
                  store,
@@ -336,11 +337,11 @@ defmodule Ariadne.Flow.ReactionsTest do
       refute_received {:got, "counts", _, _}
     end
 
-    test "an engine error fails the pass and halts the remaining reactors" do
+    test "an engine error fails the pass as a typed reactor failure, halting the rest" do
       store = Store.InMemory.init()
       events = append(store)
 
-      assert {:error, :engine_boom} =
+      assert {:error, %ReactorError{name: "counts", position: nil, reason: :engine_boom}} =
                Reactions.react(
                  [CountsReactor, AlphaReactor],
                  store,

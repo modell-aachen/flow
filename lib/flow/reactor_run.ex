@@ -2,6 +2,7 @@ defmodule Ariadne.Flow.ReactorRun do
   @moduledoc false
   alias Ariadne.Flow.ConsumeResult
   alias Ariadne.Flow.Reactor
+  alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.StoredEventReactor
@@ -20,6 +21,8 @@ defmodule Ariadne.Flow.ReactorRun do
   end
 
   def sync?(%__MODULE__{reactor: reactor_module}), do: reactor_module.reactor().sync
+
+  def name(%__MODULE__{reactor: reactor_module}), do: reactor_module.reactor().name
 
   def dump(%__MODULE__{reactor: reactor, start_after_position: position, metadata: metadata}) do
     %{
@@ -57,7 +60,7 @@ defmodule Ariadne.Flow.ReactorRun do
   defp catch_up(store, %StoredEventReactor{name: name} = stored_event_reactor) do
     case Store.consume(store, stored_event_reactor) do
       %ConsumeResult{status: :error, last_position: position, failure: %{reason: reason}} ->
-        {:error, {:reactor_failed, %{name: name, position: position, reason: reason}}}
+        {:error, %ReactorError{name: name, position: position, reason: reason}}
 
       %ConsumeResult{more?: true} ->
         catch_up(store, stored_event_reactor)

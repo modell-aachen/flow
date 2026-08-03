@@ -1,11 +1,14 @@
 defmodule Ariadne.Flow.ApplicationTest do
   use ExUnit.Case, async: true
   alias Ariadne.Flow.AfterCommit
+  alias Ariadne.Flow.AppendConditionError
   alias Ariadne.Flow.Application
+  alias Ariadne.Flow.CommandError
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
   alias Ariadne.Flow.Projection
   alias Ariadne.Flow.ReactorEngine
+  alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
   alias Ecto.Adapters.SQL.Sandbox
@@ -258,20 +261,33 @@ defmodule Ariadne.Flow.ApplicationTest do
       refute_received {:got, "counts", _, _}
     end
 
-    test "returns the reaction side's error when a reactor fails" do
+    test "raises a reactor failure with its name, position and reason" do
       application = application([BoomReactor])
 
-      assert {:error, {:reactor_failed, %{name: "boom", reason: :kaboom}}} =
-               Application.dispatch(application, count_command(1))
+      error =
+        assert_raise ReactorError, fn ->
+          Application.dispatch(application, count_command(1))
+        end
+
+      assert %ReactorError{name: "boom", reason: :kaboom} = error
+      assert is_integer(error.position)
     end
 
     test "keeps the command's events when a reactor returns an error" do
-      store = inbox_store()
+      store = postgres_store()
       application = Application.new(%{store: store, reactors: [BoomReactor]})
 
-      assert {:error, {:reactor_failed, _}} = Application.dispatch(application, count_command(1))
+      assert_raise ReactorError, fn -> Application.dispatch(application, count_command(1)) end
 
       assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
+    end
+
+    test "returns a typed error when the append condition fails" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+
+      assert {:error, %AppendConditionError{}} =
+               Application.dispatch(application, conflicting_count_command(store))
     end
 
     test "rolls back the command's events when a reactor raises" do
@@ -372,7 +388,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       store = inbox_store()
       application = after_commit_application(store, [CountsReactor])
 
-      assert {:error, :append_condition_failed} =
+      assert {:error, %AppendConditionError{}} =
                Application.dispatch(application, conflicting_count_command(store))
 
       assert recorded_steps() == []
@@ -381,8 +397,7 @@ defmodule Ariadne.Flow.ApplicationTest do
     test "discards the ones already collected when a later reactor fails" do
       application = after_commit_application(inbox_store(), [CountsReactor, BoomSyncReactor])
 
-      assert {:error, {:reactor_failed, %{name: "boom-sync", reason: :kaboom}}} =
-               Application.dispatch(application, count_command(1))
+      assert_raise ReactorError, fn -> Application.dispatch(application, count_command(1)) end
 
       assert recorded_steps() == [
                {:engine_ran, CountsReactor},
@@ -401,7 +416,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "counts", %CountEvent{count: 1}, _}
     end
 
-    test "returns the command error without raising when the command fails" do
+    test "raises when the command is refused, carrying the refusal reason" do
       store = inbox_store()
       base = Application.new(%{store: store})
       {:ok, _} = Application.dispatch(base, count_command(1))
@@ -410,7 +425,19 @@ defmodule Ariadne.Flow.ApplicationTest do
 
       application = Application.new(%{store: store, reactors: [CountsReactor]})
 
-      assert {:error, :count_too_high} = Application.dispatch!(application, count_command(1))
+      error =
+        assert_raise CommandError, fn -> Application.dispatch!(application, count_command(1)) end
+
+      assert error.reason == :count_too_high
+    end
+
+    test "raises when the append condition fails" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+
+      assert_raise AppendConditionError, fn ->
+        Application.dispatch!(application, conflicting_count_command(store))
+      end
     end
 
     test "returns the plain result when a reactor deferred work to an after-commit callback" do
@@ -425,7 +452,7 @@ defmodule Ariadne.Flow.ApplicationTest do
     test "raises when a reactor fails" do
       application = application([BoomReactor])
 
-      assert_raise RuntimeError, ~r/reactor "boom" failed at position .*: :kaboom/, fn ->
+      assert_raise ReactorError, ~r/reactor "boom" failed at position \d+: :kaboom/, fn ->
         Application.dispatch!(application, count_command(1))
       end
     end

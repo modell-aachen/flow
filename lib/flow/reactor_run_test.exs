@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.ReactorRunTest do
   use ExUnit.Case, async: true
+  alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
@@ -251,8 +252,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
       ])
 
       assert {:error,
-              {:reactor_failed,
-               %{name: "rejects-zero", position: position, reason: :zero_not_allowed}}} =
+              %ReactorError{name: "rejects-zero", position: position, reason: :zero_not_allowed}} =
                ReactorRun.execute(run(RejectsZeroReactor), store)
 
       assert is_integer(position)

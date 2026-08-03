@@ -73,17 +73,28 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
 {:error, :course_full}
 ```
 
-`dispatch/3` returns one of two shapes:
+`dispatch/3` returns one of three shapes:
 
 - `{:ok, %{events: entries}}` — the command emitted events and they were appended. `entries` is a list with one map per appended event, each carrying:
   - `:event` — the event struct the command emitted.
   - `:metadata` — the metadata stored with the event, including the default `:created_at`.
   - `:type` and `:tags` — the stored form of the event, as `Ariadne.Flow.Store.Event.Encoder` wrote it.
 - `{:error, reason}` — the command returned `{:error, reason}`. Nothing is written and the reason is passed back unchanged.
+- `{:error, %Ariadne.Flow.AppendConditionError{}}` — a concurrent dispatch appended events matching this command's query between its read and its append. Nothing is written; see [concurrency](#concurrency).
+
+The line between values and raises is the commit: both error values mean nothing was written, so the caller may safely dispatch again. A failure on the other side of the commit — a reactor failing after the events were appended — is raised instead; see [reactors](#reactors).
 
 `dispatch/3` is the only way events enter the store in an `Ariadne.Flow` program — every write goes through a command and is justified by the events that came before it.
 
 The third argument is a keyword list of options, all optional — the calls above pass none, so they look like a two-argument call. The available options are covered in the next section.
+
+### dispatch!/3
+
+`dispatch!/3` behaves like `dispatch/3` but raises where `dispatch/3` returns an error value, so a caller that only cares about the success path cannot silently drop a failure. Each exception type carries its retry semantics:
+
+- `Ariadne.Flow.CommandError` — the command refused, wrapping the refusal `reason`. Nothing was written; dispatching again is pointless until the state it decided from changes.
+- `Ariadne.Flow.AppendConditionError` — the append condition failed. Nothing was written; retrying the dispatch is safe and decides from the new events.
+- `Ariadne.Flow.ReactorError` — raised by `dispatch/3` and `dispatch!/3` alike: the events were committed and a reactor failed afterwards. Never re-dispatch the command — that would append the events a second time. See [reactors](#reactors).
 
 ## Metadata
 
@@ -142,7 +153,11 @@ Ariadne.Flow.Reactor.new(
 )
 ```
 
-Every successful `dispatch/3` drives the configured reactors over the events that dispatch produced, in one ordered pass, halting on the first failure. The append and that pass share one store transaction (see [transactions](store.html#transactions)), so they commit as one unit — a reactor that returns an error still leaves the events in the store, but a crash part-way through the pass takes the append back out with it. Each reactor is handed to the application's **engine**, which decides how it runs — inline in the dispatching process, or deferred onto a job system. See [the engine](#the-engine) below.
+Every successful `dispatch/3` drives the configured reactors over the events that dispatch produced, in one ordered pass, halting on the first failure. The append and that pass share one store transaction (see [transactions](store.html#transactions)), so they commit as one unit — a reactor that returns an error still leaves the events in the store, but a crash part-way through the pass takes the append back out with it. A reactor therefore chooses the fate of the dispatch's events by how it expresses a failure: returning `{:error, reason}` keeps them, raising rolls them back.
+
+When a reactor returns an error, the dispatch raises `Ariadne.Flow.ReactorError` — carrying the reactor's `name`, the `position` it failed at, and its `reason` — rather than returning an error value, because the events are already committed: an error value would be a partial success masquerading as a failure, and any generic retry-on-error wrapper around the dispatch would append the events a second time. Recovery is not the dispatcher's job either — the failed reactor's checkpoint is parked right before the poison event and commits with the dispatch, so the reactor picks up from there on its next run once the cause is fixed.
+
+Each reactor is handed to the application's **engine**, which decides how it runs — inline in the dispatching process, or deferred onto a job system. See [the engine](#the-engine) below.
 
 ## The engine
 
@@ -156,7 +171,9 @@ On dispatch, the application builds one `Ariadne.Flow.ReactorRun` per reactor �
 
 Honoring a reactor's declared intent is the engine's obligation: `Ariadne.Flow.ReactorRun.sync?/1` tells it whether the run it was handed is synchronous, and a synchronous run must be executed inline so its failure fails the dispatch. Only asynchronous runs may be deferred.
 
-An engine may also hand back work for after the dispatch's transaction: returning `{:ok, %Ariadne.Flow.AfterCommit{}}` wraps a one-arity callback that Flow runs once the transaction closure has returned. The struct is handed back to the callback, so later fields can travel with it. Flow collects the callbacks in reactor-declaration order, at most one per reactor, and runs them sequentially in the dispatching process — a callback may therefore close over process-local state. They run on the success path only: an engine error halts the pass and discards whatever was collected before it. Their return values are ignored, so `dispatch/3` returns exactly what it returns without them, and a callback that raises propagates out of `dispatch/3` — Flow neither rescues nor logs it. Note that a dispatch nested in an outer transaction joins it rather than committing (see [transactions](store.html#transactions)), so there the callback runs at savepoint release rather than after a commit.
+Any `{:error, reason}` the engine returns halts the pass and surfaces as a raised `Ariadne.Flow.ReactorError` after the commit, exactly like a failed reactor — the events stay in the store. An engine that fails to *hand off* a deferred run (a job insert failing, say) must therefore raise instead of returning an error: only a raise rolls the transaction back, and committing events whose run was never enqueued would leave no one to catch the reactor up.
+
+An engine may also hand back work for after the dispatch's transaction: returning `{:ok, %Ariadne.Flow.AfterCommit{}}` wraps a one-arity callback that Flow runs once the transaction closure has returned. The struct is handed back to the callback, so later fields can travel with it. Flow collects the callbacks in reactor-declaration order, at most one per reactor, and runs them sequentially in the dispatching process — a callback may therefore close over process-local state. They run on the success path only: an engine error halts the pass and discards whatever was collected before it. Their return values are ignored, so `dispatch/3` returns exactly what it returns without them, and a callback that raises propagates out of `dispatch/3` — Flow neither rescues nor logs it. Because the transaction has already committed by then, the raise cannot take the events back out, and the callback is not retried: after-commit callbacks are inherently at-most-once, so work that must not be lost belongs in the deferred run itself, not in the callback. Note that a dispatch nested in an outer transaction joins it rather than committing (see [transactions](store.html#transactions)), so there the callback runs at savepoint release rather than after a commit.
 
 An engine that defers serialises the run with `Ariadne.Flow.ReactorRun.dump/1` and hands the resulting map to its job system (e.g. as job arguments); the worker rebuilds the run with `Ariadne.Flow.ReactorRun.load/1` and executes it against the store. The dump carries the dispatch metadata, so context the worker needs (correlation IDs, tenancy) crosses the boundary with the run rather than beside it. `Ariadne.Flow` itself knows nothing about queueing or retries — that is entirely the engine's concern.
 
@@ -171,8 +188,8 @@ For example, two processes try to subscribe the last free seat of a course at th
 1. Both read `course_capacity` and `course_subscriptions` for course 42 and see one seat left.
 2. Both decide `{:ok, [%StudentSubscribedToCourse{...}]}`.
 3. The first one appends its event and returns `{:ok, ...}`.
-4. The second one's append fails — a new event has appeared in its query range since the snapshot was taken. `dispatch/3` returns `{:error, :append_condition_failed}`.
+4. The second one's append fails — a new event has appeared in its query range since the snapshot was taken. `dispatch/3` returns `{:error, %Ariadne.Flow.AppendConditionError{}}`.
 
-The caller can retry a failed dispatch. On retry, the command re-reads and now sees the other dispatch's event; the second subscription is rejected with `{:error, :course_full}` instead.
+The caller can retry a conflicted dispatch: nothing was written, and on retry the command re-reads and now sees the other dispatch's event — the second subscription is rejected with `{:error, :course_full}` instead. This retry advice covers only the two error *values* (the conflict and the command's own refusal), which both happen before anything is committed. A raise out of a dispatch means the events were committed — re-dispatching would append them again.
 
 More generally, each event reducer defines its own consistency boundary: its `query/1` tells the Application which events it depends on, and that same query is what concurrency checks against. Two reducers with non-overlapping queries never conflict — `subscribe_student(42, 7)` and `subscribe_student(99, 3)` proceed independently because their tags (`"course:42"` vs `"course:99"`) make their queries disjoint.

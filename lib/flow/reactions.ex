@@ -1,6 +1,7 @@
 defmodule Ariadne.Flow.Reactions do
   @moduledoc false
   alias Ariadne.Flow.AfterCommit
+  alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
@@ -21,9 +22,17 @@ defmodule Ariadne.Flow.Reactions do
           })
 
         case engine.run(reactor_run, store, opts) do
-          :ok -> {:cont, {:ok, after_commits}}
-          {:ok, %AfterCommit{} = after_commit} -> {:cont, {:ok, [after_commit | after_commits]}}
-          {:error, _} = error -> {:halt, error}
+          :ok ->
+            {:cont, {:ok, after_commits}}
+
+          {:ok, %AfterCommit{} = after_commit} ->
+            {:cont, {:ok, [after_commit | after_commits]}}
+
+          {:error, %ReactorError{} = error} ->
+            {:halt, {:error, error}}
+
+          {:error, reason} ->
+            {:halt, {:error, %ReactorError{name: ReactorRun.name(reactor_run), reason: reason}}}
         end
       end)
 

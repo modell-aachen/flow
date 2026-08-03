@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.CommandHandlerTest do
   use ExUnit.Case, async: true
+  alias Ariadne.Flow.AppendConditionError
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
   alias Ariadne.Flow.Projection
@@ -156,7 +157,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     test "fails the append when an event matching the command's query arrives while it decides" do
       store = Store.InMemory.init()
 
-      assert {:error, :append_condition_failed} =
+      assert {:error, %AppendConditionError{}} =
                CommandHandler.handle(conflicting_count_command(store), store)
 
       assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
@@ -175,7 +176,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     test "fails the append of a command reading only the last matching event just the same" do
       store = Store.InMemory.init()
 
-      assert {:error, :append_condition_failed} =
+      assert {:error, %AppendConditionError{}} =
                CommandHandler.handle(conflicting_last_count_command(store), store)
 
       assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)

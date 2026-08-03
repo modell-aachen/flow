@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.CommandHandler do
   @moduledoc false
+  alias Ariadne.Flow.AppendConditionError
   alias Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.AppendCondition
@@ -22,9 +23,15 @@ defmodule Ariadne.Flow.CommandHandler do
           Keyword.get(opts, :created_at)
         )
 
-      with {:ok, %{events: sequenced_events}} <-
-             Store.append(store, store_events, append_opts) do
-        {:ok, %{events: Enum.map(sequenced_events, &Codec.deserialize/1)}}
+      case Store.append(store, store_events, append_opts) do
+        {:ok, %{events: sequenced_events}} ->
+          {:ok, %{events: Enum.map(sequenced_events, &Codec.deserialize/1)}}
+
+        {:error, :append_condition_failed} ->
+          {:error, %AppendConditionError{}}
+
+        {:error, _} = error ->
+          error
       end
     end
   end
