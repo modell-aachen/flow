@@ -10,11 +10,15 @@ defmodule Ariadne.Flow.Consistency do
   @enforce_keys [:reactors, :timeout]
   defstruct @enforce_keys
 
-  @type t :: %__MODULE__{reactors: [String.t()], timeout: non_neg_integer()}
+  @type t :: %__MODULE__{reactors: [%Reactor{}], timeout: non_neg_integer()}
 
   @doc """
-  What a dispatch has to confirm before it returns: the names of the sync reactors among
-  `reactors`, and how long to wait for them.
+  What a dispatch has to confirm before it returns: the sync reactors among `reactors`,
+  and how long to wait for them.
+
+  The reactors are kept as their own declarations rather than as names, because a name
+  alone does not say how far that reactor has to get: its filter is what decides which of
+  the dispatch's events it will ever process, and so what its checkpoint has to reach.
 
   A dispatch nested inside an outer transaction confirms nothing. Its events and any job
   row the engine wrote are invisible until the outer commit, so no checkpoint could
@@ -31,52 +35,66 @@ defmodule Ariadne.Flow.Consistency do
   end
 
   @doc """
-  Waits until every awaited reactor has checkpointed at or past the highest position of
-  `events`.
+  Waits until every awaited reactor has checkpointed at or past the last of `events` it
+  will process.
 
-  Confirmation is the checkpoint, not the state of whatever the engine enqueued: under
-  the per-reactor consumption lock a concurrent dispatch's run may be the one that
-  processes these events, leaving this dispatch's own run to no-op. The checkpoint is
-  store-observable and engine-agnostic — an engine that executed the run inline has
-  already advanced it, so the first check confirms and nothing is waited on.
+  The target is per reactor, not one position for the whole dispatch: a checkpoint records
+  the last *matching* event a reactor consumed and stays put on events its filter skips, so
+  a reactor is caught up once its checkpoint reaches the highest appended position matching
+  its filter. A reactor matching none of the dispatch's events has nothing to catch up to
+  and is not waited on at all.
+
+  Confirmation is the checkpoint, not the state of whatever the engine enqueued: under the
+  per-reactor consumption lock a concurrent dispatch's run may be the one that processes
+  these events, leaving this dispatch's own run to no-op. The checkpoint is store-observable
+  and engine-agnostic — an engine that executed the run inline has already advanced it, so
+  the first check confirms and nothing is waited on.
 
   Returns `{:error, %Ariadne.Flow.ConsistencyTimeoutError{}}` when the timeout runs out
-  first. That is not a failure of the dispatch: the events are committed and the runs
-  stay scheduled. It is the caller's read-your-writes expectation that went unmet.
+  first. That is not a failure of the dispatch: the events are committed and the runs stay
+  scheduled. It is the caller's read-your-writes expectation that went unmet.
   """
   def await(%__MODULE__{reactors: []}, %Store{}, _events), do: :ok
 
   def await(%__MODULE__{}, %Store{}, []), do: :ok
 
-  def await(%__MODULE__{timeout: timeout} = consistency, %Store{} = store, events) do
-    poll(consistency, store, highest_position(events), now() + timeout)
+  def await(%__MODULE__{reactors: reactors, timeout: timeout}, %Store{} = store, events) do
+    case Enum.flat_map(reactors, &target(&1, events)) do
+      [] -> :ok
+      targets -> poll(store, targets, timeout, now() + timeout)
+    end
   end
 
-  defp poll(%__MODULE__{reactors: reactors} = consistency, store, position, deadline) do
-    pending = Enum.reject(reactors, &confirmed?(store, &1, position))
+  # The last event of this dispatch the reactor is going to process, as the name its
+  # checkpoint is keyed on and the position that checkpoint has to reach.
+  defp target(%Reactor{name: name} = reactor, events) do
+    case Enum.filter(events, &Reactor.matches?(reactor, &1)) do
+      [] -> []
+      matching -> [%{name: name, position: highest_position(matching)}]
+    end
+  end
+
+  defp poll(store, targets, timeout, deadline) do
+    pending = Enum.reject(targets, &confirmed?(store, &1))
 
     cond do
       pending == [] ->
         :ok
 
       now() >= deadline ->
-        {:error, timed_out(consistency, pending, position)}
+        {:error, ConsistencyTimeoutError.exception(unconfirmed: pending, timeout: timeout)}
 
       true ->
         Process.sleep(@poll_interval)
-        poll(consistency, store, position, deadline)
+        poll(store, targets, timeout, deadline)
     end
   end
 
-  defp confirmed?(store, name, position) do
+  defp confirmed?(store, %{name: name, position: position}) do
     case Store.checkpoint(store, name) do
       nil -> false
       checkpoint -> checkpoint >= position
     end
-  end
-
-  defp timed_out(%__MODULE__{timeout: timeout}, pending, position) do
-    ConsistencyTimeoutError.exception(reactors: pending, position: position, timeout: timeout)
   end
 
   defp awaited(_reactors, true), do: []
@@ -84,7 +102,7 @@ defmodule Ariadne.Flow.Consistency do
   defp awaited(reactors, false) do
     Enum.flat_map(reactors, fn reactor_module ->
       case reactor_module.reactor() do
-        %Reactor{sync: true, name: name} -> [name]
+        %Reactor{sync: true} = reactor -> [reactor]
         %Reactor{} -> []
       end
     end)

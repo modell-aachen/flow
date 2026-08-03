@@ -3,6 +3,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
   alias Ariadne.Flow.Consistency
   alias Ariadne.Flow.ConsistencyTimeoutError
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Reactor
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Event.Codec
@@ -13,6 +14,13 @@ defmodule Ariadne.Flow.ConsistencyTest do
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
+  end
+
+  defmodule OtherEvent do
+    @derive Ariadne.Flow.Store.Event.Encoder
+    defstruct []
+
+    def tags(_), do: []
   end
 
   defmodule Recorder do
@@ -37,6 +45,18 @@ defmodule Ariadne.Flow.ConsistencyTest do
     def reactor, do: Recorder.reactor("other-sync", %{sync: true})
   end
 
+  defmodule TaggedSyncReactor do
+    alias Ariadne.Flow.ConsistencyTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "tagged-sync", filter: %{types: [CountEvent], tags: ["only:me"]}, sync: true},
+        fn _event, _metadata -> :ok end
+      )
+    end
+  end
+
   defmodule AsyncReactor do
     alias Ariadne.Flow.ConsistencyTest.Recorder
     def reactor, do: Recorder.reactor("async")
@@ -44,11 +64,12 @@ defmodule Ariadne.Flow.ConsistencyTest do
 
   @impatient [await_timeout: 50]
 
-  defp store_with_events(count) do
-    store = Store.InMemory.init()
+  defp store_with_counts(count),
+    do: store_with_events(for(n <- 1..count, do: count_store_event(n)))
 
-    {:ok, %{events: events}} =
-      Store.append(store, for(n <- 1..count, do: count_store_event(n)))
+  defp store_with_events(store_events) do
+    store = Store.InMemory.init()
+    {:ok, %{events: events}} = Store.append(store, store_events)
 
     {store, Enum.map(events, &Codec.deserialize/1)}
   end
@@ -61,13 +82,29 @@ defmodule Ariadne.Flow.ConsistencyTest do
     }
   end
 
+  defp tagged_store_event do
+    %Store.Event{
+      type: "Ariadne.Flow.ConsistencyTest.CountEvent",
+      data: %{"count" => 9},
+      tags: ["only:me"]
+    }
+  end
+
+  defp other_store_event do
+    %Store.Event{
+      type: "Ariadne.Flow.ConsistencyTest.OtherEvent",
+      data: %{},
+      tags: []
+    }
+  end
+
   defp execute(store, reactor_module) do
     :ok = ReactorRun.execute(ReactorRun.new(%{reactor: reactor_module}), store)
   end
 
   describe "new/3" do
-    test "awaits the sync reactors, named by the name their checkpoint is keyed on" do
-      assert %Consistency{reactors: ["sync", "other-sync"]} =
+    test "awaits the sync reactors, keeping the declaration that says how far each must get" do
+      assert %Consistency{reactors: [%Reactor{name: "sync"}, %Reactor{name: "other-sync"}]} =
                Consistency.new([SyncReactor, AsyncReactor, OtherSyncReactor], false, [])
     end
 
@@ -90,26 +127,26 @@ defmodule Ariadne.Flow.ConsistencyTest do
 
   describe "await/3" do
     test "confirms at once when the reactor already checkpointed past the events" do
-      {store, events} = store_with_events(2)
+      {store, events} = store_with_counts(2)
       execute(store, SyncReactor)
 
       assert :ok = Consistency.await(Consistency.new([SyncReactor], false, []), store, events)
     end
 
     test "confirms without reading the store when there is nothing to await" do
-      {store, events} = store_with_events(1)
+      {store, events} = store_with_counts(1)
 
       assert :ok = Consistency.await(Consistency.new([AsyncReactor], false, []), store, events)
     end
 
     test "confirms when the dispatch appended no events" do
-      {store, _events} = store_with_events(1)
+      {store, _events} = store_with_counts(1)
 
       assert :ok = Consistency.await(Consistency.new([SyncReactor], false, []), store, [])
     end
 
     test "confirms once a deferred run advances the checkpoint" do
-      {store, events} = store_with_events(1)
+      {store, events} = store_with_counts(1)
       test_pid = self()
 
       spawn_link(fn ->
@@ -129,7 +166,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
     end
 
     test "times out with the reactors it never confirmed and the position it awaited" do
-      {store, events} = store_with_events(2)
+      {store, events} = store_with_counts(2)
 
       assert {:error, %ConsistencyTimeoutError{} = error} =
                Consistency.await(
@@ -138,16 +175,19 @@ defmodule Ariadne.Flow.ConsistencyTest do
                  events
                )
 
-      assert error.reactors == ["sync", "other-sync"]
-      assert error.position == 2
+      assert error.unconfirmed == [
+               %{name: "sync", position: 2},
+               %{name: "other-sync", position: 2}
+             ]
+
       assert error.timeout == 50
     end
 
     test "times out reporting only the reactors that did not confirm" do
-      {store, events} = store_with_events(1)
+      {store, events} = store_with_counts(1)
       execute(store, SyncReactor)
 
-      assert {:error, %ConsistencyTimeoutError{reactors: ["other-sync"]}} =
+      assert {:error, %ConsistencyTimeoutError{unconfirmed: [%{name: "other-sync"}]}} =
                Consistency.await(
                  Consistency.new([SyncReactor, OtherSyncReactor], false, @impatient),
                  store,
@@ -156,17 +196,63 @@ defmodule Ariadne.Flow.ConsistencyTest do
     end
 
     test "awaits the highest position the dispatch appended, not the lowest" do
-      {store, events} = store_with_events(3)
+      {store, events} = store_with_counts(3)
       checkpoint_after_first_event(store, "sync")
 
       assert Store.checkpoint(store, "sync") == 1
 
-      assert {:error, %ConsistencyTimeoutError{reactors: ["sync"], position: 3}} =
+      assert {:error, %ConsistencyTimeoutError{unconfirmed: [%{name: "sync", position: 3}]}} =
                Consistency.await(
                  Consistency.new([SyncReactor], false, @impatient),
                  store,
                  events
                )
+    end
+
+    test "confirms a caught-up reactor whose filter misses the dispatch's last event" do
+      {store, events} = store_with_events([count_store_event(1), other_store_event()])
+      execute(store, SyncReactor)
+
+      # The checkpoint stays put on the event the filter skipped, so awaiting the highest
+      # position the dispatch appended would burn the whole timeout on a caught-up reactor.
+      assert Store.checkpoint(store, "sync") == 1
+
+      assert :ok =
+               Consistency.await(Consistency.new([SyncReactor], false, @impatient), store, events)
+    end
+
+    test "does not await a reactor that matches none of the dispatch's events" do
+      {store, events} = store_with_events([other_store_event()])
+
+      assert Store.checkpoint(store, "sync") == nil
+
+      assert :ok =
+               Consistency.await(Consistency.new([SyncReactor], false, @impatient), store, events)
+    end
+
+    test "awaits only the reactors the dispatch's events concern" do
+      {store, events} = store_with_events([count_store_event(1)])
+
+      assert {:error, %ConsistencyTimeoutError{unconfirmed: [%{name: "sync", position: 1}]}} =
+               Consistency.await(
+                 Consistency.new([SyncReactor, TaggedSyncReactor], false, @impatient),
+                 store,
+                 events
+               )
+    end
+
+    test "awaits each reactor at its own last matching event" do
+      {store, events} =
+        store_with_events([tagged_store_event(), count_store_event(1), count_store_event(2)])
+
+      assert {:error, %ConsistencyTimeoutError{unconfirmed: unconfirmed}} =
+               Consistency.await(
+                 Consistency.new([SyncReactor, TaggedSyncReactor], false, @impatient),
+                 store,
+                 events
+               )
+
+      assert unconfirmed == [%{name: "sync", position: 3}, %{name: "tagged-sync", position: 1}]
     end
   end
 
@@ -174,26 +260,26 @@ defmodule Ariadne.Flow.ConsistencyTest do
     test "says the events are committed and must not be dispatched again" do
       message =
         Exception.message(%ConsistencyTimeoutError{
-          reactors: ["sync"],
-          position: 7,
+          unconfirmed: [%{name: "sync", position: 7}],
           timeout: 5_000
         })
 
-      assert message =~ ~s(the sync reactor "sync" did not reach position 7 within 5000ms)
+      assert message =~ ~s|the sync reactor "sync" (awaited at position 7)|
+      assert message =~ "did not catch up within 5000ms"
       assert message =~ "committed"
       assert message =~ "durably scheduled"
       assert message =~ "never re-dispatch"
     end
 
-    test "names every unconfirmed reactor" do
+    test "names every unconfirmed reactor with the position it was awaited at" do
       message =
         Exception.message(%ConsistencyTimeoutError{
-          reactors: ["sync", "other-sync"],
-          position: 7,
+          unconfirmed: [%{name: "sync", position: 7}, %{name: "tagged-sync", position: 3}],
           timeout: 5_000
         })
 
-      assert message =~ ~s(the sync reactors "sync", "other-sync")
+      assert message =~
+               ~s|the sync reactors "sync" (awaited at position 7), "tagged-sync" (awaited at position 3)|
     end
   end
 

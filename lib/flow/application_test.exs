@@ -21,6 +21,13 @@ defmodule Ariadne.Flow.ApplicationTest do
     def tags(%{count: count}), do: ["count:#{count}"]
   end
 
+  defmodule OtherEvent do
+    @derive Ariadne.Flow.Store.Event.Encoder
+    defstruct []
+
+    def tags(_), do: []
+  end
+
   defmodule CountsReactor do
     alias Ariadne.Flow.ApplicationTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -149,6 +156,15 @@ defmodule Ariadne.Flow.ApplicationTest do
         %{count: 3} -> {:error, :count_too_high}
         %{count: count} -> {:ok, [%CountEvent{count: count + increase}]}
       end
+    )
+  end
+
+  # The last event this appends is one no reactor here reacts to, so the dispatch's highest
+  # position is past every sync reactor's own last matching event.
+  defp count_then_other_command do
+    Composite.new(
+      %{count: num_counts_projection()},
+      fn %{count: count} -> {:ok, [%CountEvent{count: count + 1}, %OtherEvent{}]} end
     )
   end
 
@@ -386,7 +402,11 @@ defmodule Ariadne.Flow.ApplicationTest do
           Application.dispatch(application, count_command(1), await_timeout: 50)
         end
 
-      assert %ConsistencyTimeoutError{reactors: ["sync-counts"], position: 1, timeout: 50} = error
+      assert %ConsistencyTimeoutError{
+               unconfirmed: [%{name: "sync-counts", position: 1}],
+               timeout: 50
+             } = error
+
       refute_received {:got, "sync-counts", _, _}
     end
 
@@ -412,6 +432,15 @@ defmodule Ariadne.Flow.ApplicationTest do
         })
 
       assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 0)
+    end
+
+    test "confirms a caught-up reactor when the dispatch's last event misses its filter" do
+      application = Application.new(%{store: inbox_store(), reactors: [SyncCountsReactor]})
+
+      assert {:ok, %{events: [_count, _other]}} =
+               Application.dispatch(application, count_then_other_command(), await_timeout: 50)
+
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
     test "raises the reactor's failure rather than waiting the timeout out" do
