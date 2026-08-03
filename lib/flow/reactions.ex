@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.Reactions do
   @moduledoc false
+  alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
@@ -19,8 +20,15 @@ defmodule Ariadne.Flow.Reactions do
         })
 
       case engine.run(reactor_run, store, opts) do
-        :ok -> {:cont, :ok}
-        {:error, _} = error -> {:halt, error}
+        :ok ->
+          {:cont, :ok}
+
+        {:error, %ReactorError{} = error} ->
+          {:halt, {:error, error}}
+
+        {:error, reason} ->
+          failure = %{name: ReactorRun.name(reactor_run), position: nil, reason: reason}
+          {:halt, {:error, %ReactorError{failures: [failure]}}}
       end
     end)
   end
