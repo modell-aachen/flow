@@ -1,6 +1,5 @@
 defmodule Ariadne.Flow.Application do
   @moduledoc false
-  alias Ariadne.Flow.AfterCommit
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Reactions
@@ -20,14 +19,12 @@ defmodule Ariadne.Flow.Application do
   def dispatch(%__MODULE__{store: store, reactors: reactors, engine: engine}, command, opts \\ []) do
     metadata = Keyword.get(opts, :metadata, %{})
 
-    store
-    |> Store.transaction(fn ->
+    Store.transaction(store, fn ->
       with {:ok, %{events: events} = result} <- CommandHandler.handle(command, store, opts),
-           {:ok, after_commits} <- Reactions.react(reactors, store, events, metadata, engine) do
-        {:ok, result, after_commits}
+           :ok <- Reactions.react(reactors, store, events, metadata, engine) do
+        {:ok, result}
       end
     end)
-    |> run_after_commits()
   end
 
   def dispatch!(%__MODULE__{} = application, command, opts \\ []) do
@@ -43,11 +40,4 @@ defmodule Ariadne.Flow.Application do
   def query(%__MODULE__{store: store}, event_reducer) do
     EventReducer.evaluate(event_reducer, store).result
   end
-
-  defp run_after_commits({:ok, result, after_commits}) do
-    Enum.each(after_commits, &AfterCommit.run/1)
-    {:ok, result}
-  end
-
-  defp run_after_commits(error), do: error
 end

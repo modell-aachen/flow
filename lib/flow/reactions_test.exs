@@ -1,6 +1,5 @@
 defmodule Ariadne.Flow.ReactionsTest do
   use ExUnit.Case, async: true
-  alias Ariadne.Flow.AfterCommit
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
   alias Ariadne.Flow.Projection
@@ -110,21 +109,6 @@ defmodule Ariadne.Flow.ReactionsTest do
     end
   end
 
-  defmodule AfterCommitEngine do
-    @behaviour ReactorEngine
-
-    @impl ReactorEngine
-    def run(%ReactorRun{reactor: reactor}, _store, opts) do
-      inbox = Keyword.fetch!(opts, :inbox)
-
-      if reactor in Keyword.get(opts, :plain, []) do
-        :ok
-      else
-        {:ok, AfterCommit.new(fn _after_commit -> send(inbox, {:after_commit, reactor}) end)}
-      end
-    end
-  end
-
   @inline {ReactorEngine.Inline, []}
 
   defp num_counts_projection do
@@ -162,14 +146,14 @@ defmodule Ariadne.Flow.ReactionsTest do
     test "returns :ok without touching reactors when there are no events" do
       store = inbox_store()
 
-      assert {:ok, []} = Reactions.react([BoomReactor], store, [], %{}, @inline)
+      assert :ok = Reactions.react([BoomReactor], store, [], %{}, @inline)
     end
 
     test "returns :ok when there are no reactors" do
       store = inbox_store()
       events = append(store)
 
-      assert {:ok, []} = Reactions.react([], store, events, %{}, @inline)
+      assert :ok = Reactions.react([], store, events, %{}, @inline)
     end
   end
 
@@ -178,7 +162,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = inbox_store()
       events = append(store)
 
-      assert {:ok, []} = Reactions.react([AlphaReactor, BetaReactor], store, events, %{}, @inline)
+      assert :ok = Reactions.react([AlphaReactor, BetaReactor], store, events, %{}, @inline)
 
       assert_received {:got, "alpha", %CountEvent{count: 1}, _}
       assert_received {:got, "beta", %CountEvent{count: 1}, _}
@@ -189,7 +173,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       _earlier = append(store)
       events = append(store)
 
-      assert {:ok, []} = Reactions.react([CountsReactor], store, events, %{}, @inline)
+      assert :ok = Reactions.react([CountsReactor], store, events, %{}, @inline)
 
       assert_received {:got, "counts", %CountEvent{count: 2}, _}
       refute_received {:got, "counts", %CountEvent{count: 1}, _}
@@ -208,7 +192,7 @@ defmodule Ariadne.Flow.ReactionsTest do
 
       {:ok, %{events: events}} = CommandHandler.handle(bulk_command, store)
 
-      assert {:ok, []} = Reactions.react([CountsReactor], store, events, %{}, @inline)
+      assert :ok = Reactions.react([CountsReactor], store, events, %{}, @inline)
 
       Enum.each(1..total, fn _ -> assert_received {:got, "counts", _, _} end)
       refute_received {:got, "counts", _, _}
@@ -242,7 +226,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = inbox_store()
       events = append(store)
 
-      assert {:ok, []} =
+      assert :ok =
                Reactions.react(
                  [SyncReactor, CountsReactor],
                  store,
@@ -278,7 +262,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = Store.InMemory.init()
       events = append(store)
 
-      assert {:ok, []} = Reactions.react([CountsReactor], store, events, %{}, RecordingEngine)
+      assert :ok = Reactions.react([CountsReactor], store, events, %{}, RecordingEngine)
 
       assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, ^store, []}
     end
@@ -287,7 +271,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = Store.InMemory.init()
       events = append(store)
 
-      assert {:ok, []} =
+      assert :ok =
                Reactions.react(
                  [CountsReactor],
                  store,
@@ -305,7 +289,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = Store.InMemory.init()
       events = append(store)
 
-      assert {:ok, []} =
+      assert :ok =
                Reactions.react(
                  [CountsReactor],
                  store,
@@ -323,7 +307,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = inbox_store()
       events = append(store)
 
-      assert {:ok, []} =
+      assert :ok =
                Reactions.react(
                  [CountsReactor],
                  store,
@@ -351,61 +335,6 @@ defmodule Ariadne.Flow.ReactionsTest do
 
       assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, _, _}
       refute_received {:engine_run, _, _, _}
-    end
-  end
-
-  describe "react/5 collects the engine's after-commit callbacks" do
-    test "collects one per reactor, in reactor-declaration order" do
-      store = Store.InMemory.init()
-      events = append(store)
-
-      assert {:ok, [first, second]} =
-               Reactions.react(
-                 [AlphaReactor, BetaReactor],
-                 store,
-                 events,
-                 %{},
-                 {AfterCommitEngine, inbox: self()}
-               )
-
-      AfterCommit.run(first)
-      assert_received {:after_commit, AlphaReactor}
-
-      AfterCommit.run(second)
-      assert_received {:after_commit, BetaReactor}
-    end
-
-    test "collects nothing for a reactor the engine answered with a bare :ok" do
-      store = Store.InMemory.init()
-      events = append(store)
-
-      assert {:ok, [only]} =
-               Reactions.react(
-                 [AlphaReactor, BetaReactor],
-                 store,
-                 events,
-                 %{},
-                 {AfterCommitEngine, inbox: self(), plain: [AlphaReactor]}
-               )
-
-      AfterCommit.run(only)
-      assert_received {:after_commit, BetaReactor}
-    end
-
-    test "does not run what it collects" do
-      store = Store.InMemory.init()
-      events = append(store)
-
-      assert {:ok, [_, _]} =
-               Reactions.react(
-                 [AlphaReactor, BetaReactor],
-                 store,
-                 events,
-                 %{},
-                 {AfterCommitEngine, inbox: self()}
-               )
-
-      refute_received {:after_commit, _}
     end
   end
 end
