@@ -54,7 +54,7 @@ Everything the function wrote to the store — appended events, advanced reactor
 
 An error *return* is not a rollback. `{:error, reason}` comes back as it is, with the writes that led to it kept, the same as before there was a boundary at all: a command that refuses has written nothing anyway, and a reactor that returns an error leaves the events it failed on in the store, to be reacted to again later. Deciding that an error should undo the writes is the caller's business, and a caller who wants that can raise.
 
-The transaction also joins an ambient one — its own `transaction/2`, or, with the Postgres store, any transaction on the same repo — rather than committing independently inside it.
+The transaction also joins an ambient one — its own `transaction/2`, or, with the Postgres store, any transaction on the same repo — rather than committing independently inside it. `Ariadne.Flow.Store.in_transaction?/1` answers whether there is one to join, which is how a caller finds out whether a write it makes now would still be invisible to everybody else. `Application.dispatch/3` asks it to decide whether a synchronous reactor's run can be [deferred and waited for](application.html#nesting).
 
 `Application.dispatch/3` wraps every dispatch in `transaction/2`, so a command's append and the pass over the reactors that react to it commit as one unit, and a crash part-way through cannot leave the events appended with only some of the reactors advanced.
 
@@ -69,7 +69,9 @@ The transaction also joins an ambient one — its own `transaction/2`, or, with 
 | `append/3` | writes events atomically, honouring the append condition it was given |
 | `count/1` | how many events the store holds, over the scope an `:all` read covers |
 | `consume/2` | hands a reactor its next batch of events and records how far it got |
+| `checkpoint/2` | the position a reactor has consumed up to, making its progress observable |
 | `transaction/2` | runs a function, rolling its writes back if it raises |
+| `in_transaction?/1` | whether the calling process is already inside a transaction on this store |
 | `telemetry_metadata/1` | the metadata that identifies this storage on store telemetry |
 | `dump/1` and `load/1` | serialise the config, so a store can travel to a job system |
 

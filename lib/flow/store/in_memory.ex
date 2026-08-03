@@ -50,17 +50,19 @@ defmodule Ariadne.Flow.Store.InMemory do
   end
 
   @impl Backend
-  def transaction(agent, fun) when is_function(fun, 0) do
-    snapshot = Agent.get(agent, & &1)
-
-    try do
-      fun.()
-    catch
-      kind, reason ->
-        Agent.update(agent, fn _state -> snapshot end)
-        :erlang.raise(kind, reason, __STACKTRACE__)
-    end
+  def checkpoint(agent, name) do
+    Agent.get(agent, &State.checkpoint(&1, name))
   end
+
+  @impl Backend
+  def transaction(agent, fun) when is_function(fun, 0) do
+    if in_transaction?(agent), do: fun.(), else: rolling_back_on_raise(agent, fun)
+  end
+
+  # The transaction is the calling process's, so whether one is open is process-local
+  # state — the agent holds the events, not who is currently writing them.
+  @impl Backend
+  def in_transaction?(agent), do: Process.get(transaction_key(agent), false)
 
   @impl Backend
   def telemetry_metadata(_agent), do: %{}
@@ -72,4 +74,21 @@ defmodule Ariadne.Flow.Store.InMemory do
 
   @impl Backend
   def load(agent), do: agent
+
+  defp rolling_back_on_raise(agent, fun) do
+    snapshot = Agent.get(agent, & &1)
+    Process.put(transaction_key(agent), true)
+
+    try do
+      fun.()
+    catch
+      kind, reason ->
+        Agent.update(agent, fn _state -> snapshot end)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    after
+      Process.delete(transaction_key(agent))
+    end
+  end
+
+  defp transaction_key(agent), do: {__MODULE__, :transaction, agent}
 end

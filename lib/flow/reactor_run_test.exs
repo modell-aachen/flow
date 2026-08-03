@@ -122,12 +122,36 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert %ReactorRun{metadata: %{"tenant_id" => "acme"}} =
                ReactorRun.new(%{reactor: CountsReactor, metadata: %{"tenant_id" => "acme"}})
     end
+
+    test "is not nested unless the dispatch says it is" do
+      assert %ReactorRun{nested: false} = ReactorRun.new(%{reactor: CountsReactor})
+      assert %ReactorRun{nested: true} = ReactorRun.new(%{reactor: CountsReactor, nested: true})
+    end
   end
 
   describe "sync?/1" do
     test "reads the sync intent off the run's reactor" do
       assert ReactorRun.sync?(run(SyncReactor))
       refute ReactorRun.sync?(run(CountsReactor))
+    end
+
+    test "does not depend on the run being nested" do
+      assert ReactorRun.sync?(run(SyncReactor, %{nested: true}))
+    end
+  end
+
+  describe "inline?/1" do
+    test "is true only for a sync run of a nested dispatch, the one that cannot be deferred" do
+      assert ReactorRun.inline?(run(SyncReactor, %{nested: true}))
+    end
+
+    test "is false for a sync run the engine may defer and await" do
+      refute ReactorRun.inline?(run(SyncReactor))
+    end
+
+    test "is false for an async run, nested or not" do
+      refute ReactorRun.inline?(run(CountsReactor))
+      refute ReactorRun.inline?(run(CountsReactor, %{nested: true}))
     end
   end
 
@@ -154,6 +178,14 @@ defmodule Ariadne.Flow.ReactorRunTest do
         |> Map.merge(%{"store" => %{"module" => "x"}, "sync" => false, "tenant_id" => "acme"})
 
       assert %ReactorRun{reactor: CountsReactor} = ReactorRun.load(payload)
+    end
+
+    test "drops the nesting flag, which belongs to the dispatch and not to the execution" do
+      payload = ReactorRun.dump(run(SyncReactor, %{nested: true}))
+
+      refute Map.has_key?(payload, "nested")
+      assert %ReactorRun{nested: false} = loaded = ReactorRun.load(payload)
+      refute ReactorRun.inline?(loaded)
     end
 
     test "loads a metadata-less payload with empty metadata" do

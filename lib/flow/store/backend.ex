@@ -86,6 +86,17 @@ defmodule Ariadne.Flow.Store.Backend do
   @callback consume(config(), StoredEventReactor.t()) :: ConsumeResult.t()
 
   @doc """
+  Returns the position the reactor's stored checkpoint stands at, `nil` when it has none.
+
+  This is the stored value alone — where a reactor would resume, not counting the
+  `start_after_position` a run falls back to before its first checkpoint exists. It is
+  what makes a reactor's progress observable without consuming: a caller that needs to
+  know whether a reactor has caught up to an appended event compares this to its
+  position.
+  """
+  @callback checkpoint(config(), name :: String.t()) :: non_neg_integer() | nil
+
+  @doc """
   Runs `fun` inside a store transaction and returns whatever it returned.
 
   Everything `fun` wrote — appended events, advanced checkpoints — is rolled back if it
@@ -94,6 +105,17 @@ defmodule Ariadne.Flow.Store.Backend do
   on its own.
   """
   @callback transaction(config(), (-> result)) :: result when result: var
+
+  @doc """
+  Whether the calling process is already inside a transaction on this store.
+
+  True inside `c:transaction/2` — including a transaction the caller never opened
+  through this store, any transaction on the Postgres backend's repo — and false
+  outside one. It answers whether a write made now would still be invisible to other
+  processes, which is what a caller asking another process to observe its writes needs
+  to know before it waits on them.
+  """
+  @callback in_transaction?(config()) :: boolean()
 
   @doc """
   Returns the metadata this backend adds to the store's telemetry events.

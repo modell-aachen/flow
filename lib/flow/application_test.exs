@@ -5,11 +5,13 @@ defmodule Ariadne.Flow.ApplicationTest do
   alias Ariadne.Flow.CommandError
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
+  alias Ariadne.Flow.ConsistencyTimeoutError
   alias Ariadne.Flow.Projection
   alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
+  alias Ariadne.Flow.Test.Repo
   alias Ecto.Adapters.SQL.Sandbox
 
   defmodule CountEvent do
@@ -64,6 +66,33 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
+  defmodule SyncCountsReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "sync-counts", filter: %{types: [CountEvent]}, sync: true},
+        fn event, metadata ->
+          send(Process.get(:inbox), {:got, "sync-counts", event, metadata})
+          :ok
+        end
+      )
+    end
+  end
+
+  defmodule BoomSyncReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "boom-sync", filter: %{types: [CountEvent]}, sync: true},
+        fn _event, _metadata -> {:error, :kaboom} end
+      )
+    end
+  end
+
   defmodule RecordingEngine do
     @behaviour ReactorEngine
 
@@ -71,6 +100,31 @@ defmodule Ariadne.Flow.ApplicationTest do
     def run(payload, store, opts) do
       send(self(), {:engine_run, payload, store, opts})
       Keyword.get(opts, :result, :ok)
+    end
+  end
+
+  # An enqueue-first engine: it executes only the runs that could never be confirmed
+  # otherwise and defers the rest onto another process, standing in for a job system.
+  # `delay: :never` is the job that never gets around to running.
+  defmodule DeferringEngine do
+    @behaviour ReactorEngine
+
+    @impl ReactorEngine
+    def run(reactor_run, store, opts) do
+      cond do
+        ReactorRun.inline?(reactor_run) -> ReactorRun.execute(reactor_run, store)
+        Keyword.get(opts, :delay, :never) == :never -> :ok
+        true -> defer(reactor_run, store, Keyword.fetch!(opts, :delay))
+      end
+    end
+
+    defp defer(reactor_run, store, delay) do
+      spawn(fn ->
+        Process.sleep(delay)
+        ReactorRun.execute(reactor_run, store)
+      end)
+
+      :ok
     end
   end
 
@@ -112,8 +166,8 @@ defmodule Ariadne.Flow.ApplicationTest do
   # A raising reactor takes the InMemory agent down with it, so the store has to
   # be one whose reactors run in the calling process to observe a rollback.
   defp postgres_store do
-    :ok = Sandbox.checkout(Ariadne.Flow.Test.Repo)
-    Store.Postgres.init(repo: Ariadne.Flow.Test.Repo, prefix: "postgres_store_test_schema")
+    :ok = Sandbox.checkout(Repo)
+    Store.Postgres.init(repo: Repo, prefix: "postgres_store_test_schema")
   end
 
   # An InMemory store whose agent process knows the test pid, so module reactors
@@ -296,6 +350,145 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
+  describe "dispatch/3 awaits its sync reactors" do
+    test "returns once a deferred sync run has advanced the reactor's checkpoint" do
+      application =
+        Application.new(%{
+          store: inbox_store(),
+          reactors: [SyncCountsReactor],
+          engine: {DeferringEngine, delay: 20}
+        })
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
+               Application.dispatch(application, count_command(1), await_timeout: 2_000)
+
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
+    end
+
+    test "confirms instantly when the engine ran the reactor inline" do
+      application = Application.new(%{store: inbox_store(), reactors: [SyncCountsReactor]})
+
+      assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 0)
+
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
+    end
+
+    test "raises a consistency timeout naming the reactor and the position it awaited" do
+      application =
+        Application.new(%{
+          store: inbox_store(),
+          reactors: [SyncCountsReactor],
+          engine: DeferringEngine
+        })
+
+      error =
+        assert_raise ConsistencyTimeoutError, fn ->
+          Application.dispatch(application, count_command(1), await_timeout: 50)
+        end
+
+      assert %ConsistencyTimeoutError{reactors: ["sync-counts"], position: 1, timeout: 50} = error
+      refute_received {:got, "sync-counts", _, _}
+    end
+
+    test "keeps the committed events when the await times out" do
+      store = inbox_store()
+
+      application =
+        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: DeferringEngine})
+
+      assert_raise ConsistencyTimeoutError, fn ->
+        Application.dispatch(application, count_command(1), await_timeout: 50)
+      end
+
+      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
+    end
+
+    test "does not await an async reactor the engine deferred" do
+      application =
+        Application.new(%{
+          store: inbox_store(),
+          reactors: [CountsReactor],
+          engine: DeferringEngine
+        })
+
+      assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 0)
+    end
+
+    test "raises the reactor's failure rather than waiting the timeout out" do
+      application = Application.new(%{store: inbox_store(), reactors: [BoomSyncReactor]})
+
+      assert_raise ReactorError, fn ->
+        Application.dispatch(application, count_command(1), await_timeout: 10_000)
+      end
+    end
+  end
+
+  describe "dispatch/3 nested in an outer transaction" do
+    test "tells the engine the run is nested, so it can see it must not defer it" do
+      store = inbox_store()
+
+      application =
+        Application.new(%{
+          store: store,
+          reactors: [SyncCountsReactor],
+          engine: {RecordingEngine, result: :ok}
+        })
+
+      Store.transaction(store, fn -> Application.dispatch(application, count_command(1)) end)
+
+      assert_received {:engine_run, %ReactorRun{reactor: SyncCountsReactor, nested: true} = run,
+                       _store, _opts}
+
+      assert ReactorRun.inline?(run)
+    end
+
+    test "executes the sync run inline instead of awaiting a confirmation that cannot come" do
+      store = inbox_store()
+
+      application =
+        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: DeferringEngine})
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
+               Store.transaction(store, fn ->
+                 Application.dispatch(application, count_command(1), await_timeout: 0)
+               end)
+
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
+    end
+
+    test "runs inline under a repo transaction the dispatch knows nothing about" do
+      store = postgres_store()
+      Process.put(:inbox, self())
+
+      application =
+        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: DeferringEngine})
+
+      assert {:ok, _} =
+               Repo.transaction(fn ->
+                 Application.dispatch(application, count_command(1), await_timeout: 0)
+               end)
+
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
+    end
+
+    test "is not treated as nested when the caller opened no transaction" do
+      store = postgres_store()
+
+      application =
+        Application.new(%{
+          store: store,
+          reactors: [SyncCountsReactor],
+          engine: {RecordingEngine, result: :ok}
+        })
+
+      assert_raise ConsistencyTimeoutError, fn ->
+        Application.dispatch(application, count_command(1), await_timeout: 50)
+      end
+
+      assert_received {:engine_run, %ReactorRun{nested: false}, _store, _opts}
+    end
+  end
+
   describe "dispatch!/3" do
     test "returns the result when the dispatch succeeds" do
       application = application([CountsReactor])
@@ -335,6 +528,19 @@ defmodule Ariadne.Flow.ApplicationTest do
 
       assert_raise ReactorError, ~r/reactor "boom" failed at position \d+: :kaboom/, fn ->
         Application.dispatch!(application, count_command(1))
+      end
+    end
+
+    test "raises when a sync reactor does not confirm in time" do
+      application =
+        Application.new(%{
+          store: inbox_store(),
+          reactors: [SyncCountsReactor],
+          engine: DeferringEngine
+        })
+
+      assert_raise ConsistencyTimeoutError, ~r/never re-dispatch/, fn ->
+        Application.dispatch!(application, count_command(1), await_timeout: 50)
       end
     end
   end

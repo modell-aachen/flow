@@ -4,10 +4,10 @@ defmodule Ariadne.Flow.Reactions do
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
-  def react(_reactors, _store, [], _metadata, _engine), do: :ok
-  def react([], _store, _events, _metadata, _engine), do: :ok
+  def react(_reactors, _store, [], _metadata, _engine, _nested), do: :ok
+  def react([], _store, _events, _metadata, _engine, _nested), do: :ok
 
-  def react(reactors, %Store{} = store, events, metadata, engine) do
+  def react(reactors, %Store{} = store, events, metadata, engine, nested) do
     start_after_position = lowest_position(events) - 1
     {engine, opts} = normalize_engine(engine)
 
@@ -17,7 +17,8 @@ defmodule Ariadne.Flow.Reactions do
           ReactorRun.new(%{
             reactor: reactor_module,
             start_after_position: start_after_position,
-            metadata: metadata
+            metadata: metadata,
+            nested: nested
           })
 
         failures(engine.run(reactor_run, store, opts), reactor_run)

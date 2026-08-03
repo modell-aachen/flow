@@ -189,12 +189,23 @@ defmodule Ariadne.Flow.Store.Postgres do
   end
 
   @impl Backend
+  def checkpoint(%__MODULE__{repo: repo, prefix: prefix, context: context}, name) do
+    case repo.get_by(EctoReactorCheckpoint, [context: context, name: name], prefix: prefix) do
+      nil -> nil
+      %EctoReactorCheckpoint{position: position} -> position
+    end
+  end
+
+  @impl Backend
   def transaction(%__MODULE__{repo: repo}, fun) when is_function(fun, 0) do
     case repo.transaction(fun) do
       {:ok, result} -> result
       {:error, reason} -> {:error, reason}
     end
   end
+
+  @impl Backend
+  def in_transaction?(%__MODULE__{repo: repo}), do: repo.in_transaction?()
 
   @impl Backend
   def telemetry_metadata(%__MODULE__{prefix: prefix, context: context}) do
@@ -247,16 +258,8 @@ defmodule Ariadne.Flow.Store.Postgres do
   defp position_after(_batch, 0, prior_position), do: prior_position
   defp position_after(batch, count, _prior) when count > 0, do: Enum.at(batch, count - 1).position
 
-  defp read_checkpoint_position(
-         %__MODULE__{repo: repo, prefix: prefix, context: context},
-         name,
-         start_after_position
-       ) do
-    case repo.get_by(EctoReactorCheckpoint, [context: context, name: name], prefix: prefix) do
-      nil -> start_after_position
-      %EctoReactorCheckpoint{position: position} -> position
-    end
-  end
+  defp read_checkpoint_position(%__MODULE__{} = config, name, start_after_position),
+    do: checkpoint(config, name) || start_after_position
 
   defp write_checkpoint_position(
          %__MODULE__{repo: repo, prefix: prefix, context: context},
