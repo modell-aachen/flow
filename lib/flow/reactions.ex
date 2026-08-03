@@ -1,42 +1,36 @@
 defmodule Ariadne.Flow.Reactions do
   @moduledoc false
-  alias Ariadne.Flow.AfterCommit
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
-  def react(_reactors, _store, [], _metadata, _engine), do: {:ok, []}
-  def react([], _store, _events, _metadata, _engine), do: {:ok, []}
+  def react(_reactors, _store, [], _metadata, _engine), do: :ok
+  def react([], _store, _events, _metadata, _engine), do: :ok
 
   def react(reactors, %Store{} = store, events, metadata, engine) do
     start_after_position = lowest_position(events) - 1
     {engine, opts} = normalize_engine(engine)
 
-    collected =
-      Enum.reduce_while(reactors, {:ok, []}, fn reactor_module, {:ok, after_commits} ->
-        reactor_run =
-          ReactorRun.new(%{
-            reactor: reactor_module,
-            start_after_position: start_after_position,
-            metadata: metadata
-          })
+    Enum.reduce_while(reactors, :ok, fn reactor_module, :ok ->
+      reactor_run =
+        ReactorRun.new(%{
+          reactor: reactor_module,
+          start_after_position: start_after_position,
+          metadata: metadata
+        })
 
-        case engine.run(reactor_run, store, opts) do
-          :ok ->
-            {:cont, {:ok, after_commits}}
+      case engine.run(reactor_run, store, opts) do
+        :ok ->
+          {:cont, :ok}
 
-          {:ok, %AfterCommit{} = after_commit} ->
-            {:cont, {:ok, [after_commit | after_commits]}}
+        {:error, %ReactorError{} = error} ->
+          {:halt, {:error, error}}
 
-          {:error, %ReactorError{} = error} ->
-            {:halt, {:error, error}}
-
-          {:error, reason} ->
-            {:halt, {:error, %ReactorError{name: ReactorRun.name(reactor_run), reason: reason}}}
-        end
-      end)
-
-    with {:ok, after_commits} <- collected, do: {:ok, Enum.reverse(after_commits)}
+        {:error, reason} ->
+          failure = %{name: ReactorRun.name(reactor_run), position: nil, reason: reason}
+          {:halt, {:error, %ReactorError{failures: [failure]}}}
+      end
+    end)
   end
 
   def normalize_engine({module, opts}) when is_atom(module) and is_list(opts), do: {module, opts}

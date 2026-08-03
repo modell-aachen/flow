@@ -252,7 +252,9 @@ defmodule Ariadne.Flow.ReactorRunTest do
       ])
 
       assert {:error,
-              %ReactorError{name: "rejects-zero", position: position, reason: :zero_not_allowed}} =
+              %ReactorError{
+                failures: [%{name: "rejects-zero", position: position, reason: :zero_not_allowed}]
+              }} =
                ReactorRun.execute(run(RejectsZeroReactor), store)
 
       assert is_integer(position)

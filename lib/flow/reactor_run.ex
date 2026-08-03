@@ -60,7 +60,7 @@ defmodule Ariadne.Flow.ReactorRun do
   defp catch_up(store, %StoredEventReactor{name: name} = stored_event_reactor) do
     case Store.consume(store, stored_event_reactor) do
       %ConsumeResult{status: :error, last_position: position, failure: %{reason: reason}} ->
-        {:error, %ReactorError{name: name, position: position, reason: reason}}
+        {:error, %ReactorError{failures: [%{name: name, position: position, reason: reason}]}}
 
       %ConsumeResult{more?: true} ->
         catch_up(store, stored_event_reactor)

@@ -1,6 +1,5 @@
 defmodule Ariadne.Flow.ApplicationTest do
   use ExUnit.Case, async: true
-  alias Ariadne.Flow.AfterCommit
   alias Ariadne.Flow.AppendConditionError
   alias Ariadne.Flow.Application
   alias Ariadne.Flow.CommandError
@@ -32,17 +31,6 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
-  defmodule OtherCountsReactor do
-    alias Ariadne.Flow.ApplicationTest.CountEvent
-    alias Ariadne.Flow.Reactor
-
-    def reactor do
-      Reactor.new(%{name: "other-counts", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
-        :ok
-      end)
-    end
-  end
-
   defmodule BoomReactor do
     alias Ariadne.Flow.ApplicationTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -51,18 +39,6 @@ defmodule Ariadne.Flow.ApplicationTest do
       Reactor.new(%{name: "boom", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
         {:error, :kaboom}
       end)
-    end
-  end
-
-  defmodule BoomSyncReactor do
-    alias Ariadne.Flow.ApplicationTest.CountEvent
-    alias Ariadne.Flow.Reactor
-
-    def reactor do
-      Reactor.new(
-        %{name: "boom-sync", filter: %{types: [CountEvent]}, sync: true},
-        fn _event, _metadata -> {:error, :kaboom} end
-      )
     end
   end
 
@@ -85,35 +61,6 @@ defmodule Ariadne.Flow.ApplicationTest do
       send(self(), {:engine_run, payload, store, opts})
       Keyword.get(opts, :result, :ok)
     end
-  end
-
-  # Shaped like the real async engine: sync reactors run inline, async ones are
-  # deferred and report back through an after-commit callback.
-  defmodule AfterCommitEngine do
-    @behaviour ReactorEngine
-
-    @impl ReactorEngine
-    def run(%ReactorRun{reactor: reactor} = reactor_run, store, opts) do
-      inbox = Keyword.fetch!(opts, :inbox)
-      send(inbox, {:step, {:engine_ran, reactor}})
-
-      if ReactorRun.sync?(reactor_run) do
-        ReactorRun.execute(reactor_run, store)
-      else
-        {:ok,
-         AfterCommit.new(fn _after_commit ->
-           send(inbox, {:step, {:after_commit, reactor, self()}})
-         end)}
-      end
-    end
-  end
-
-  defmodule RaisingAfterCommitEngine do
-    @behaviour ReactorEngine
-
-    @impl ReactorEngine
-    def run(_reactor_run, _store, _opts),
-      do: {:ok, AfterCommit.new(fn _after_commit -> raise "kaboom" end)}
   end
 
   defp num_counts_projection do
@@ -172,14 +119,6 @@ defmodule Ariadne.Flow.ApplicationTest do
     store
   end
 
-  defp after_commit_application(store, reactors) do
-    Application.new(%{
-      store: store,
-      reactors: reactors,
-      engine: {AfterCommitEngine, inbox: self()}
-    })
-  end
-
   # Appending from inside the decide function lands between the command's read and
   # its append, which is the conflict the append condition guards against.
   defp conflicting_count_command(store) do
@@ -187,14 +126,6 @@ defmodule Ariadne.Flow.ApplicationTest do
       {:ok, _} = CommandHandler.handle(count_command(1), store)
       {:ok, [%CountEvent{count: count + 1}]}
     end)
-  end
-
-  defp recorded_steps(acc \\ []) do
-    receive do
-      {:step, step} -> recorded_steps([step | acc])
-    after
-      0 -> Enum.reverse(acc)
-    end
   end
 
   describe "new/1" do
@@ -261,6 +192,14 @@ defmodule Ariadne.Flow.ApplicationTest do
       refute_received {:got, "counts", _, _}
     end
 
+    test "returns a typed error when the append condition fails" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+
+      assert {:error, %AppendConditionError{}} =
+               Application.dispatch(application, conflicting_count_command(store))
+    end
+
     test "raises a reactor failure with its name, position and reason" do
       application = application([BoomReactor])
 
@@ -269,8 +208,10 @@ defmodule Ariadne.Flow.ApplicationTest do
           Application.dispatch(application, count_command(1))
         end
 
-      assert %ReactorError{name: "boom", reason: :kaboom} = error
-      assert is_integer(error.position)
+      assert %ReactorError{failures: [%{name: "boom", position: position, reason: :kaboom}]} =
+               error
+
+      assert is_integer(position)
     end
 
     test "keeps the command's events when a reactor returns an error" do
@@ -280,14 +221,6 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_raise ReactorError, fn -> Application.dispatch(application, count_command(1)) end
 
       assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
-    end
-
-    test "returns a typed error when the append condition fails" do
-      store = inbox_store()
-      application = Application.new(%{store: store})
-
-      assert {:error, %AppendConditionError{}} =
-               Application.dispatch(application, conflicting_count_command(store))
     end
 
     test "rolls back the command's events when a reactor raises" do
@@ -334,78 +267,6 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
-  describe "dispatch/3 after-commit callbacks" do
-    test "runs them once each in reactor-declaration order, after the whole reactor pass" do
-      application = after_commit_application(inbox_store(), [CountsReactor, OtherCountsReactor])
-
-      assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
-               Application.dispatch(application, count_command(1))
-
-      assert [
-               {:engine_ran, CountsReactor},
-               {:engine_ran, OtherCountsReactor},
-               {:after_commit, CountsReactor, first_pid},
-               {:after_commit, OtherCountsReactor, second_pid}
-             ] = recorded_steps()
-
-      # Both in the dispatching process, so a callback may close over process-local state.
-      assert first_pid == self()
-      assert second_pid == self()
-    end
-
-    test "runs them outside the transaction, so a raising one leaves the events in place" do
-      store = postgres_store()
-
-      application =
-        Application.new(%{
-          store: store,
-          reactors: [CountsReactor],
-          engine: RaisingAfterCommitEngine
-        })
-
-      assert_raise RuntimeError, "kaboom", fn ->
-        Application.dispatch(application, count_command(1))
-      end
-
-      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
-    end
-
-    test "runs none when the command is refused" do
-      store = inbox_store()
-      base = Application.new(%{store: store})
-      {:ok, _} = Application.dispatch(base, count_command(1))
-      {:ok, _} = Application.dispatch(base, count_command(1))
-      {:ok, _} = Application.dispatch(base, count_command(1))
-
-      application = after_commit_application(store, [CountsReactor])
-
-      assert {:error, :count_too_high} = Application.dispatch(application, count_command(1))
-
-      assert recorded_steps() == []
-    end
-
-    test "runs none when the append condition fails" do
-      store = inbox_store()
-      application = after_commit_application(store, [CountsReactor])
-
-      assert {:error, %AppendConditionError{}} =
-               Application.dispatch(application, conflicting_count_command(store))
-
-      assert recorded_steps() == []
-    end
-
-    test "discards the ones already collected when a later reactor fails" do
-      application = after_commit_application(inbox_store(), [CountsReactor, BoomSyncReactor])
-
-      assert_raise ReactorError, fn -> Application.dispatch(application, count_command(1)) end
-
-      assert recorded_steps() == [
-               {:engine_ran, CountsReactor},
-               {:engine_ran, BoomSyncReactor}
-             ]
-    end
-  end
-
   describe "dispatch!/3" do
     test "returns the result when the dispatch succeeds" do
       application = application([CountsReactor])
@@ -438,15 +299,6 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_raise AppendConditionError, fn ->
         Application.dispatch!(application, conflicting_count_command(store))
       end
-    end
-
-    test "returns the plain result when a reactor deferred work to an after-commit callback" do
-      application = after_commit_application(inbox_store(), [CountsReactor])
-
-      assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
-               Application.dispatch!(application, count_command(1))
-
-      assert [{:engine_ran, CountsReactor}, {:after_commit, CountsReactor, _}] = recorded_steps()
     end
 
     test "raises when a reactor fails" do
