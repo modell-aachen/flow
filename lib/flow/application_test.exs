@@ -42,6 +42,17 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
+  defmodule AlsoBoomReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(%{name: "also-boom", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
+        {:error, :kaboom_again}
+      end)
+    end
+  end
+
   defmodule RaisingReactor do
     alias Ariadne.Flow.ApplicationTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -212,6 +223,24 @@ defmodule Ariadne.Flow.ApplicationTest do
                error
 
       assert is_integer(position)
+    end
+
+    test "raises one error carrying every failure, having driven the reactors after a failing one" do
+      application = application([BoomReactor, CountsReactor, AlsoBoomReactor])
+
+      error =
+        assert_raise ReactorError, fn ->
+          Application.dispatch(application, count_command(1))
+        end
+
+      assert %ReactorError{
+               failures: [
+                 %{name: "boom", reason: :kaboom},
+                 %{name: "also-boom", reason: :kaboom_again}
+               ]
+             } = error
+
+      assert_received {:got, "counts", %CountEvent{count: 1}, _}
     end
 
     test "keeps the command's events when a reactor returns an error" do

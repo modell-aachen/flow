@@ -43,11 +43,6 @@ defmodule Ariadne.Flow.ReactionsTest do
     def reactor, do: Recorder.reactor("beta")
   end
 
-  defmodule NeverReactor do
-    alias Ariadne.Flow.ReactionsTest.Recorder
-    def reactor, do: Recorder.reactor("never")
-  end
-
   defmodule SyncReactor do
     alias Ariadne.Flow.ReactionsTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -200,15 +195,39 @@ defmodule Ariadne.Flow.ReactionsTest do
     end
   end
 
-  describe "react/5 halts on the first failure" do
-    test "halts on the first failing reactor and skips the remaining ones" do
+  describe "react/5 continues past a failure" do
+    test "runs the reactors after a failing one, in declaration order" do
       store = inbox_store()
       events = append(store)
 
       assert {:error, %ReactorError{failures: [%{name: "boom"}]}} =
-               Reactions.react([BoomReactor, NeverReactor], store, events, %{}, @inline)
+               Reactions.react(
+                 [BoomReactor, AlphaReactor, BetaReactor],
+                 store,
+                 events,
+                 %{},
+                 @inline
+               )
 
-      refute_received {:got, "never", _, _}
+      assert_received {:got, "alpha", _, _}
+      assert_received {:got, "beta", _, _}
+    end
+
+    test "collects every failure of the pass into one error, in declaration order" do
+      store = inbox_store()
+      events = append(store)
+
+      assert {:error, %ReactorError{failures: failures}} =
+               Reactions.react(
+                 [BoomReactor, AlphaReactor, BoomSyncReactor],
+                 store,
+                 events,
+                 %{},
+                 @inline
+               )
+
+      assert [%{name: "boom", reason: :kaboom}, %{name: "boom-sync", reason: :kaboom}] = failures
+      assert_received {:got, "alpha", _, _}
     end
 
     test "reports a reactor failure with its name, position and reason" do
@@ -254,8 +273,22 @@ defmodule Ariadne.Flow.ReactionsTest do
                  %{},
                  DeferringEngine
                )
+    end
 
-      refute_received {:deferred, _}
+    test "still defers the async reactors declared after a failing sync one" do
+      store = inbox_store()
+      events = append(store)
+
+      assert {:error, %ReactorError{}} =
+               Reactions.react(
+                 [BoomSyncReactor, CountsReactor],
+                 store,
+                 events,
+                 %{},
+                 DeferringEngine
+               )
+
+      assert_received {:deferred, %ReactorRun{reactor: CountsReactor}}
     end
   end
 
@@ -322,12 +355,17 @@ defmodule Ariadne.Flow.ReactionsTest do
       refute_received {:got, "counts", _, _}
     end
 
-    test "an engine error fails the pass as a typed reactor failure, halting the rest" do
+    test "an engine error fails the pass as a typed reactor failure, one per failing run" do
       store = Store.InMemory.init()
       events = append(store)
 
       assert {:error,
-              %ReactorError{failures: [%{name: "counts", position: nil, reason: :engine_boom}]}} =
+              %ReactorError{
+                failures: [
+                  %{name: "counts", position: nil, reason: :engine_boom},
+                  %{name: "alpha", position: nil, reason: :engine_boom}
+                ]
+              }} =
                Reactions.react(
                  [CountsReactor, AlphaReactor],
                  store,
@@ -337,7 +375,7 @@ defmodule Ariadne.Flow.ReactionsTest do
                )
 
       assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, _, _}
-      refute_received {:engine_run, _, _, _}
+      assert_received {:engine_run, %ReactorRun{reactor: AlphaReactor}, _, _}
     end
   end
 end
