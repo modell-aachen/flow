@@ -7,7 +7,18 @@ defmodule Ariadne.Flow.CommandHandler do
   alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.Event.Encoder
 
-  def handle(command, %Store{} = store, opts \\ []) do
+  @enforce_keys [:command]
+  defstruct [:command, metadata: %{}, created_at: nil]
+
+  def new(%{command: command} = attrs) do
+    %__MODULE__{
+      command: command,
+      metadata: Map.get(attrs, :metadata, %{}),
+      created_at: Map.get(attrs, :created_at)
+    }
+  end
+
+  def handle(%__MODULE__{command: command} = command_handler, %Store{} = store) do
     %{result: result, read: read} = EventReducer.evaluate(command, store)
 
     with {:ok, events} <- result do
@@ -17,10 +28,10 @@ defmodule Ariadne.Flow.CommandHandler do
         maybe_put(
           [
             condition: AppendCondition.for_read(read),
-            metadata: Keyword.get(opts, :metadata, %{})
+            metadata: command_handler.metadata
           ],
           :created_at,
-          Keyword.get(opts, :created_at)
+          command_handler.created_at
         )
 
       case Store.append(store, store_events, append_opts) do

@@ -27,20 +27,21 @@ defmodule Ariadne.Flow.Consistency do
   alone does not say how far that reactor has to get: its filter is what decides which of
   the dispatch's events it will ever process, and so what its checkpoint has to reach.
 
-  `dispatch` carries the facts about the dispatch that decide this, `nested` being the one
-  that matters here. A dispatch nested inside an outer transaction confirms nothing: its
+  `nested` says whether the dispatch sits inside a transaction the caller opened. A
+  dispatch nested inside an outer transaction confirms nothing: its
   events and any job row the engine wrote are invisible until the outer commit, so no
   checkpoint could advance while it waits. The awaited set is therefore the complement of
   `Ariadne.Flow.ReactorRun.inline?/1` — what the engine is not told to run inline is what
   Flow waits for, and what it is told to run inline needs no waiting, the confirmation
   coming with the execution.
 
-  The wait is bounded by the `:await_timeout` option, in milliseconds.
+  The wait is bounded by `await_timeout`, in milliseconds; leaving it out (or `nil`)
+  means the caller gave none and gets the default.
   """
-  def new(reactors, dispatch, opts) when is_map(dispatch) and is_list(opts) do
+  def new(%{reactors: reactors} = attrs) do
     %__MODULE__{
-      reactors: awaited(reactors, Map.get(dispatch, :nested, false)),
-      timeout: validated_timeout(Keyword.get(opts, :await_timeout, @default_timeout))
+      reactors: awaited(reactors, Map.get(attrs, :nested, false)),
+      timeout: validated_timeout(Map.get(attrs, :await_timeout))
     }
   end
 
@@ -157,6 +158,7 @@ defmodule Ariadne.Flow.Consistency do
   # the one thing this contract reserves for outcomes the caller must not retry.
   # `:infinity` is rejected rather than supported — a dispatch that may never return is not
   # a guarantee a caller can do anything with.
+  defp validated_timeout(nil), do: @default_timeout
   defp validated_timeout(timeout) when is_integer(timeout) and timeout >= 0, do: timeout
 
   defp validated_timeout(timeout) do

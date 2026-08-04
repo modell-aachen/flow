@@ -22,27 +22,30 @@ defmodule Ariadne.Flow.Application do
   end
 
   def dispatch(%__MODULE__{store: store, reactors: reactors, engine: engine}, command, opts \\ []) do
-    # One value describing this dispatch, read by both halves of the reaction: the pass puts
-    # it on every run it builds, and the await reads the nesting off it. `in_transaction?` is
-    # asked before the dispatch opens its own transaction, because inside one the answer is
-    # always yes — what decides whether a sync run can be confirmed from outside is the
-    # transaction the *caller* brought, not the one the dispatch is about to open.
-    dispatch = %{
-      metadata: Keyword.get(opts, :metadata, %{}),
-      nested: Store.in_transaction?(store)
-    }
+    nested = Store.in_transaction?(store)
+    metadata = Keyword.get(opts, :metadata, %{})
 
-    consistency = Consistency.new(reactors, dispatch, opts)
+    command_handler =
+      CommandHandler.new(%{
+        command: command,
+        metadata: metadata,
+        created_at: Keyword.get(opts, :created_at)
+      })
+
+    reactions =
+      Reactions.new(%{reactors: reactors, engine: engine, metadata: metadata, nested: nested})
+
+    consistency =
+      Consistency.new(%{
+        reactors: reactors,
+        nested: nested,
+        await_timeout: Keyword.get(opts, :await_timeout)
+      })
 
     store
-    |> Store.transaction(fn ->
-      with {:ok, %{events: events} = result} <- CommandHandler.handle(command, store, opts),
-           :ok <- Reactions.react(reactors, store, events, engine, dispatch) do
-        {:ok, result}
-      end
-    end)
+    |> append_and_react(command_handler, reactions)
     |> raise_reactor_failure()
-    |> confirm(consistency, store)
+    |> await(consistency, store)
   end
 
   def dispatch!(%__MODULE__{} = application, command, opts \\ []) do
@@ -57,22 +60,24 @@ defmodule Ariadne.Flow.Application do
     EventReducer.evaluate(event_reducer, store).result
   end
 
-  # A reactor failure happens after the append committed — Store.transaction commits
-  # whenever the closure returns a value — so the raise must stay outside the closure:
-  # raising inside would roll back the events and the failed reactor's checkpoint.
+  defp append_and_react(store, command_handler, reactions) do
+    Store.transaction(store, fn ->
+      with {:ok, %{events: events} = result} <- CommandHandler.handle(command_handler, store),
+           :ok <- Reactions.react(reactions, store, events) do
+        {:ok, result}
+      end
+    end)
+  end
+
   defp raise_reactor_failure({:error, %ReactorError{} = error}), do: raise(error)
   defp raise_reactor_failure(result), do: result
 
-  # The wait belongs here, after the commit, and only here: while the dispatch's own
-  # transaction is open its events are invisible, so no sync reactor's checkpoint could
-  # pass them. A reactor that already failed the pass has raised by now — a definitive
-  # failure says more than a wait that would only ever run out.
-  defp confirm({:ok, %{events: events}} = result, consistency, store) do
+  defp await({:ok, %{events: events}} = result, consistency, store) do
     case Consistency.await(consistency, store, events) do
       :ok -> result
       {:error, %ConsistencyTimeoutError{} = error} -> raise error
     end
   end
 
-  defp confirm(result, _consistency, _store), do: result
+  defp await(result, _consistency, _store), do: result
 end

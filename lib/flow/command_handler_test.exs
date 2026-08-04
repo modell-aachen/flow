@@ -41,7 +41,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
 
   defp conflicting_count_command(store) do
     Composite.new(%{count: num_counts_projection()}, fn %{count: count} ->
-      {:ok, _} = CommandHandler.handle(count_command(1), store)
+      {:ok, _} = handle(count_command(1), store)
       {:ok, [%CountEvent{count: count + 1}]}
     end)
   end
@@ -55,7 +55,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
 
   defp conflicting_last_count_command(store) do
     Composite.new(%{count: last_count_projection()}, fn %{count: count} ->
-      {:ok, _} = CommandHandler.handle(count_command(1), store)
+      {:ok, _} = handle(count_command(1), store)
       {:ok, [%CountEvent{count: count + 1}]}
     end)
   end
@@ -84,21 +84,46 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     )
   end
 
-  describe "handle/3" do
+  defp handle(command, store, attrs \\ %{}) do
+    attrs
+    |> Map.put(:command, command)
+    |> CommandHandler.new()
+    |> CommandHandler.handle(store)
+  end
+
+  describe "new/1" do
+    test "keeps the command, defaulting the metadata to an empty map and created_at to nil" do
+      command = count_command(1)
+
+      assert %CommandHandler{command: ^command, metadata: %{}, created_at: nil} =
+               CommandHandler.new(%{command: command})
+    end
+
+    test "keeps the given metadata and created_at" do
+      assert %CommandHandler{metadata: %{"count" => 1}, created_at: @created_at} =
+               CommandHandler.new(%{
+                 command: count_command(1),
+                 metadata: %{"count" => 1},
+                 created_at: @created_at
+               })
+    end
+  end
+
+  describe "handle/2" do
     test "appends the command's events and returns them, given only a store" do
       store = Store.InMemory.init()
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
-               CommandHandler.handle(count_command(1), store)
+               handle(count_command(1), store)
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 2}}]}} =
-               CommandHandler.handle(count_command(1), store)
+               handle(count_command(1), store)
     end
 
     test "serializes appended events into the store unchanged" do
       store = Store.InMemory.init()
 
-      assert {:ok, _} = CommandHandler.handle(count_command(1), store)
+      assert {:ok, _} = handle(count_command(1), store)
 
       assert %{
                events: [
@@ -117,13 +142,13 @@ defmodule Ariadne.Flow.CommandHandlerTest do
       store = Store.InMemory.init()
 
       assert {:ok, _} =
-               CommandHandler.handle(metadata_command(), store, metadata: %{"count" => 1})
+               handle(metadata_command(), store, %{metadata: %{"count" => 1}})
 
       assert %{events: [%{metadata: %{"count" => 1}}, %{metadata: %{"count" => 1}}]} =
                Store.read(store)
 
       assert {:ok, _} =
-               CommandHandler.handle(metadata_command(), store, metadata: %{"count" => 1})
+               handle(metadata_command(), store, %{metadata: %{"count" => 1}})
 
       assert %{
                events: [
@@ -138,18 +163,18 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     test "stamps the given created_at on every appended event" do
       store = Store.InMemory.init()
 
-      assert {:ok, _} = CommandHandler.handle(count_command(1), store, created_at: @created_at)
+      assert {:ok, _} = handle(count_command(1), store, %{created_at: @created_at})
 
       assert %{events: [%{created_at: @created_at}]} = Store.read(store)
     end
 
     test "returns the command error unchanged without appending" do
       store = Store.InMemory.init()
-      {:ok, _} = CommandHandler.handle(count_command(1), store)
-      {:ok, _} = CommandHandler.handle(count_command(1), store)
-      {:ok, _} = CommandHandler.handle(count_command(1), store)
+      {:ok, _} = handle(count_command(1), store)
+      {:ok, _} = handle(count_command(1), store)
+      {:ok, _} = handle(count_command(1), store)
 
-      assert {:error, :count_too_high} = CommandHandler.handle(count_command(1), store)
+      assert {:error, :count_too_high} = handle(count_command(1), store)
 
       assert %{events: [_, _, _]} = Store.read(store)
     end
@@ -158,7 +183,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
       store = Store.InMemory.init()
 
       assert {:error, %AppendConditionError{}} =
-               CommandHandler.handle(conflicting_count_command(store), store)
+               handle(conflicting_count_command(store), store)
 
       assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
     end
@@ -167,17 +192,17 @@ defmodule Ariadne.Flow.CommandHandlerTest do
       store = Store.InMemory.init()
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
-               CommandHandler.handle(last_count_command(), store)
+               handle(last_count_command(), store)
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 2}}]}} =
-               CommandHandler.handle(last_count_command(), store)
+               handle(last_count_command(), store)
     end
 
     test "fails the append of a command reading only the last matching event just the same" do
       store = Store.InMemory.init()
 
       assert {:error, %AppendConditionError{}} =
-               CommandHandler.handle(conflicting_last_count_command(store), store)
+               handle(conflicting_last_count_command(store), store)
 
       assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
     end
@@ -185,7 +210,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     test "returns the append error unchanged" do
       store = FailingAppendStore.new(:append_boom)
 
-      assert {:error, :append_boom} = CommandHandler.handle(count_command(1), store)
+      assert {:error, :append_boom} = handle(count_command(1), store)
     end
   end
 end

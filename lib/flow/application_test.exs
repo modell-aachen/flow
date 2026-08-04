@@ -204,7 +204,7 @@ defmodule Ariadne.Flow.ApplicationTest do
   # its append, which is the conflict the append condition guards against.
   defp conflicting_count_command(store) do
     Composite.new(%{count: num_counts_projection()}, fn %{count: count} ->
-      {:ok, _} = CommandHandler.handle(count_command(1), store)
+      {:ok, _} = CommandHandler.handle(CommandHandler.new(%{command: count_command(1)}), store)
       {:ok, [%CountEvent{count: count + 1}]}
     end)
   end

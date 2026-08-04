@@ -4,14 +4,24 @@ defmodule Ariadne.Flow.Reactions do
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
-  def react(_reactors, _store, [], _engine, _dispatch), do: :ok
-  def react([], _store, _events, _engine, _dispatch), do: :ok
+  @enforce_keys [:reactors, :engine]
+  defstruct [:reactors, :engine, metadata: %{}, nested: false]
 
-  # `dispatch` holds what every run of this pass carries from the dispatch that caused it:
-  # its `metadata`, and whether it was `nested` in a transaction the caller opened.
-  def react(reactors, %Store{} = store, events, engine, dispatch) when is_map(dispatch) do
+  def new(%{reactors: reactors, engine: engine} = attrs) do
+    %__MODULE__{
+      reactors: reactors,
+      engine: normalize_engine(engine),
+      metadata: Map.get(attrs, :metadata, %{}),
+      nested: Map.get(attrs, :nested, false)
+    }
+  end
+
+  def react(%__MODULE__{}, %Store{}, []), do: :ok
+  def react(%__MODULE__{reactors: []}, %Store{}, _events), do: :ok
+
+  def react(%__MODULE__{} = reactions, %Store{} = store, events) do
+    %{reactors: reactors, engine: {engine, opts}, metadata: metadata, nested: nested} = reactions
     start_after_position = lowest_position(events) - 1
-    {engine, opts} = normalize_engine(engine)
 
     failures =
       Enum.flat_map(reactors, fn reactor_module ->
@@ -19,8 +29,8 @@ defmodule Ariadne.Flow.Reactions do
           ReactorRun.new(%{
             reactor: reactor_module,
             start_after_position: start_after_position,
-            metadata: Map.get(dispatch, :metadata, %{}),
-            nested: Map.get(dispatch, :nested, false)
+            metadata: metadata,
+            nested: nested
           })
 
         failures(engine.run(reactor_run, store, opts), reactor_run)
@@ -32,11 +42,6 @@ defmodule Ariadne.Flow.Reactions do
   def normalize_engine({module, opts}) when is_atom(module) and is_list(opts), do: {module, opts}
   def normalize_engine(module) when is_atom(module), do: {module, []}
 
-  # The pass runs to the end even after a failure: the dispatch commits either way
-  # (Store.transaction commits whenever the closure returns), so stopping early would
-  # only withhold the later reactors' runs — and an engine that defers a run enqueues
-  # it in this transaction, so a run never handed over is a job never inserted for
-  # events that commit regardless.
   defp failures(:ok, _reactor_run), do: []
   defp failures({:error, %ReactorError{failures: failures}}, _reactor_run), do: failures
 
