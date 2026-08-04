@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.0](https://github.com/modell-aachen/flow/compare/v0.3.0...v0.4.0) (2026-08-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* await sync reactors after the commit ([#19](https://github.com/modell-aachen/flow/issues/19))
+* continue the reaction pass after a failure ([#18](https://github.com/modell-aachen/flow/issues/18))
+* make the dispatch error contract explicit ([#15](https://github.com/modell-aachen/flow/issues/15))
+* remove the AfterCommit mechanism ([#16](https://github.com/modell-aachen/flow/issues/16))
+
+### Features
+
+* await sync reactors after the commit ([#19](https://github.com/modell-aachen/flow/issues/19)) ([036eea1](https://github.com/modell-aachen/flow/commit/036eea1d5fd039f1e7ac8f5a75d5cfba58f68417))
+* continue the reaction pass after a failure ([#18](https://github.com/modell-aachen/flow/issues/18)) ([5e3caaf](https://github.com/modell-aachen/flow/commit/5e3caafa63c37ece44440877aa6ef182210c91e9))
+* make the dispatch error contract explicit ([#15](https://github.com/modell-aachen/flow/issues/15)) ([27ac497](https://github.com/modell-aachen/flow/commit/27ac497a059a5fad6fdfa3ae685affe53903ed34))
+* remove the AfterCommit mechanism ([#16](https://github.com/modell-aachen/flow/issues/16)) ([4e0c786](https://github.com/modell-aachen/flow/commit/4e0c7864faf380aa52cd7e49262d0c5b0357f33c))
+
+
+### Refactors
+
+* dispatch collaborators as structs ([e405273](https://github.com/modell-aachen/flow/commit/e40527327af26b605353a082e32d3526d80c8899))
+* rename Reactions to Handoff ([b3a8545](https://github.com/modell-aachen/flow/commit/b3a85454f8afffcc25e15abefcad442a31693487))
+
+
+### Documentation
+
+* remove comments from Consistency ([3fec48e](https://github.com/modell-aachen/flow/commit/3fec48ee01e1e8b58bd5036ca17d0d86224ed9fd))
+
 ## [0.3.0](https://github.com/modell-aachen/flow/compare/v0.2.0...v0.3.0) (2026-07-31)
 
 
