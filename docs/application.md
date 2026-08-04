@@ -170,13 +170,19 @@ What the dispatch waits on is the reactor's **checkpoint**: it returns once ever
 
 Deliberately not the state of whatever the engine enqueued — a reactor's events are consumed one run at a time, so a concurrent dispatch's run may be the one that processes these events and leave this dispatch's own run with nothing to do, and a job that no-ops is not a reactor that failed to catch up. The checkpoint is the store's own record of how far the reactor got, so it holds whoever advanced it.
 
-The wait is bounded by the `:await_timeout` option, in milliseconds, defaulting to 5000:
+The wait is bounded by the `:await_timeout` option, a non-negative number of milliseconds defaulting to 5000:
 
 ```elixir
 iex> Ariadne.Flow.Application.dispatch(application, subscribe_student(42, 7), await_timeout: 1_000)
 ```
 
+There is no `:infinity` — a dispatch that may never return is not a guarantee a caller can act on — and anything that is not a non-negative integer raises `ArgumentError`. That check happens before the command runs, so a bad option is a plain argument error with nothing written, rather than a crash on the far side of the commit.
+
 When the timeout runs out, `dispatch/3` raises `Ariadne.Flow.ConsistencyTimeoutError`, carrying every reactor that did not confirm together with the position it was awaited at. That raise does not mean the dispatch failed: the events are committed and the runs are still durably scheduled, so those reactors will still catch up. What went unmet is the caller's expectation of reading its own write back. **Never re-dispatch the command** — the events are already in the store and dispatching again would append them a second time. Returning an error value instead would invite exactly that, since any retry-on-error wrapper around the dispatch would double-write; and returning `{:ok, ...}` would quietly withdraw the guarantee the caller asked for by declaring the reactor synchronous.
+
+The wait is for the reactor to reach this dispatch's events, but a reactor resumes from wherever its checkpoint stands, so it reaches them by working through everything in between. A synchronous reactor that has fallen ten thousand events behind cannot confirm a new dispatch until it has drained all ten thousand — which makes a single lagging synchronous reactor a way to turn *every* subsequent dispatch into a timeout, and the reason a reactor declared synchronous belongs on a queue that keeps up with it. `Ariadne.Flow.ConsistencyTimeoutError` naming the same reactor across unrelated dispatches is what that looks like from the outside.
+
+Each wait is reported as a `[:ariadne, :flow, :dispatch, :await]` telemetry span, with the reactors and positions it awaited, whether it ended `:confirmed` or in a `:timeout`, and how many rounds of checkpoint reads it took — so how long callers actually block, and how close to the timeout they come, is measurable before it turns into raises. Nothing is emitted for a dispatch with nothing to await.
 
 A synchronous reactor that *fails* is a different outcome, and `Ariadne.Flow.ReactorError` is raised for it rather than the timeout being waited out — a definitive failure says more than a wait that could only run out. That holds for a failure the dispatch can see: one the engine ran into while executing the reactor, or a run it could not hand over. A reactor that fails inside deferred work is invisible to the dispatch, which has nothing to do but wait: it times out, and the failure surfaces wherever the job system reports it.
 

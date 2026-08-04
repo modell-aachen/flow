@@ -22,18 +22,22 @@ defmodule Ariadne.Flow.Application do
   end
 
   def dispatch(%__MODULE__{store: store, reactors: reactors, engine: engine}, command, opts \\ []) do
-    metadata = Keyword.get(opts, :metadata, %{})
-
-    # Asked before the dispatch opens its own transaction, because inside one the answer is
-    # always yes: what decides whether a sync run can be confirmed from outside is the
+    # One value describing this dispatch, read by both halves of the reaction: the pass puts
+    # it on every run it builds, and the await reads the nesting off it. `in_transaction?` is
+    # asked before the dispatch opens its own transaction, because inside one the answer is
+    # always yes — what decides whether a sync run can be confirmed from outside is the
     # transaction the *caller* brought, not the one the dispatch is about to open.
-    nested = Store.in_transaction?(store)
-    consistency = Consistency.new(reactors, nested, opts)
+    dispatch = %{
+      metadata: Keyword.get(opts, :metadata, %{}),
+      nested: Store.in_transaction?(store)
+    }
+
+    consistency = Consistency.new(reactors, dispatch, opts)
 
     store
     |> Store.transaction(fn ->
       with {:ok, %{events: events} = result} <- CommandHandler.handle(command, store, opts),
-           :ok <- Reactions.react(reactors, store, events, metadata, engine, nested) do
+           :ok <- Reactions.react(reactors, store, events, engine, dispatch) do
         {:ok, result}
       end
     end)

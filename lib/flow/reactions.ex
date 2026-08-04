@@ -4,10 +4,12 @@ defmodule Ariadne.Flow.Reactions do
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
-  def react(_reactors, _store, [], _metadata, _engine, _nested), do: :ok
-  def react([], _store, _events, _metadata, _engine, _nested), do: :ok
+  def react(_reactors, _store, [], _engine, _dispatch), do: :ok
+  def react([], _store, _events, _engine, _dispatch), do: :ok
 
-  def react(reactors, %Store{} = store, events, metadata, engine, nested) do
+  # `dispatch` holds what every run of this pass carries from the dispatch that caused it:
+  # its `metadata`, and whether it was `nested` in a transaction the caller opened.
+  def react(reactors, %Store{} = store, events, engine, dispatch) when is_map(dispatch) do
     start_after_position = lowest_position(events) - 1
     {engine, opts} = normalize_engine(engine)
 
@@ -17,8 +19,8 @@ defmodule Ariadne.Flow.Reactions do
           ReactorRun.new(%{
             reactor: reactor_module,
             start_after_position: start_after_position,
-            metadata: metadata,
-            nested: nested
+            metadata: Map.get(dispatch, :metadata, %{}),
+            nested: Map.get(dispatch, :nested, false)
           })
 
         failures(engine.run(reactor_run, store, opts), reactor_run)
