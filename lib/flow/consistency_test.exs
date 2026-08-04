@@ -110,7 +110,9 @@ defmodule Ariadne.Flow.ConsistencyTest do
   end
 
   defp execute(store, reactor_module) do
-    :ok = ReactorRun.execute(ReactorRun.new(%{reactor: reactor_module}), store)
+    reactor_run = ReactorRun.new(%{reactor: reactor_module, start_after_position: 0})
+
+    :ok = ReactorRun.execute(reactor_run, store)
   end
 
   describe "new/1" do

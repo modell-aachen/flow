@@ -56,6 +56,17 @@ defmodule Ariadne.Flow.Application do
     end
   end
 
+  def catch_up(%__MODULE__{store: store, reactors: reactors, engine: engine}, opts \\ []) do
+    %{
+      reactors: reactors,
+      engine: engine,
+      metadata: Keyword.get(opts, :metadata, %{}),
+      nested: Store.in_transaction?(store)
+    }
+    |> Handoff.new()
+    |> Handoff.catch_up(store)
+  end
+
   def query(%__MODULE__{store: store}, event_reducer) do
     EventReducer.evaluate(event_reducer, store).result
   end

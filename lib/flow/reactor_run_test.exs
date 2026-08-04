@@ -24,7 +24,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
 
     def reactor(name, attrs \\ %{}) do
       Reactor.new(
-        Map.merge(%{name: name, filter: %{types: [CountEvent]}}, attrs),
+        Map.merge(%{name: name, filter: %{types: [CountEvent]}, start_after_position: 0}, attrs),
         fn event, metadata ->
           send(Process.get(:inbox), {:got, name, event, metadata})
           :ok
@@ -58,15 +58,23 @@ defmodule Ariadne.Flow.ReactorRunTest do
     def reactor, do: Recorder.reactor("seeded", %{start_after_position: 1})
   end
 
+  defmodule HeadReactor do
+    alias Ariadne.Flow.ReactorRunTest.Recorder
+    def reactor, do: Recorder.reactor("head", %{start_after_position: :head})
+  end
+
   defmodule RejectsZeroReactor do
     alias Ariadne.Flow.Reactor
     alias Ariadne.Flow.ReactorRunTest.CountEvent
 
     def reactor do
-      Reactor.new(%{name: "rejects-zero", filter: %{types: [CountEvent]}}, fn
-        %CountEvent{count: 0}, _metadata -> {:error, :zero_not_allowed}
-        _event, _metadata -> :ok
-      end)
+      Reactor.new(
+        %{name: "rejects-zero", filter: %{types: [CountEvent]}, start_after_position: 0},
+        fn
+          %CountEvent{count: 0}, _metadata -> {:error, :zero_not_allowed}
+          _event, _metadata -> :ok
+        end
+      )
     end
   end
 
@@ -76,7 +84,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
 
     def reactor do
       Reactor.new(
-        %{name: "rejects-zero", filter: %{types: [CountEvent]}},
+        %{name: "rejects-zero", filter: %{types: [CountEvent]}, start_after_position: 0},
         fn _event, _metadata -> :ok end
       )
     end
@@ -116,6 +124,15 @@ defmodule Ariadne.Flow.ReactorRunTest do
     test "honors an explicit start_after_position" do
       assert %ReactorRun{start_after_position: 5} =
                ReactorRun.new(%{reactor: CountsReactor, start_after_position: 5})
+    end
+
+    test "refuses to carry :head, which only a run builder knowing what is now can resolve" do
+      assert_raise ArgumentError, ~r/:head is a declaration.*"head"/, fn ->
+        ReactorRun.new(%{reactor: HeadReactor})
+      end
+
+      assert %ReactorRun{start_after_position: 7} =
+               ReactorRun.new(%{reactor: HeadReactor, start_after_position: 7})
     end
 
     test "carries the dispatch metadata it is given" do

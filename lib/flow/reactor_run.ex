@@ -10,12 +10,15 @@ defmodule Ariadne.Flow.ReactorRun do
   @enforce_keys [:reactor, :start_after_position]
   defstruct [:reactor, :start_after_position, metadata: %{}, nested: false]
 
+  @start_hint ":head is a declaration, not a position — the run builder resolves it against what it knows is now, for reactor "
+
   def new(%{reactor: reactor_module} = attrs) do
     reactor = reactor_module.reactor()
 
     %__MODULE__{
       reactor: reactor_module,
-      start_after_position: Map.get(attrs, :start_after_position, reactor.start_after_position),
+      start_after_position:
+        position(Map.get(attrs, :start_after_position, reactor.start_after_position), reactor),
       metadata: Map.get(attrs, :metadata, %{}),
       nested: Map.get(attrs, :nested, false)
     }
@@ -70,6 +73,11 @@ defmodule Ariadne.Flow.ReactorRun do
 
     catch_up(store, stored_event_reactor)
   end
+
+  defp position(position, _reactor) when is_integer(position) and position >= 0, do: position
+
+  defp position(:head, %Reactor{name: name}),
+    do: raise(ArgumentError, @start_hint <> inspect(name))
 
   defp catch_up(store, %StoredEventReactor{name: name} = stored_event_reactor) do
     case Store.consume(store, stored_event_reactor) do

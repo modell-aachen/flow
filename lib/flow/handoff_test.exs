@@ -20,11 +20,14 @@ defmodule Ariadne.Flow.HandoffTest do
     alias Ariadne.Flow.HandoffTest.CountEvent
     alias Ariadne.Flow.Reactor
 
-    def reactor(name) do
-      Reactor.new(%{name: name, filter: %{types: [CountEvent]}}, fn event, metadata ->
-        send(Process.get(:inbox), {:got, name, event, metadata})
-        :ok
-      end)
+    def reactor(name, attrs \\ %{}) do
+      Reactor.new(
+        Map.merge(%{name: name, filter: %{types: [CountEvent]}}, attrs),
+        fn event, metadata ->
+          send(Process.get(:inbox), {:got, name, event, metadata})
+          :ok
+        end
+      )
     end
   end
 
@@ -41,6 +44,28 @@ defmodule Ariadne.Flow.HandoffTest do
   defmodule BetaReactor do
     alias Ariadne.Flow.HandoffTest.Recorder
     def reactor, do: Recorder.reactor("beta")
+  end
+
+  defmodule FromOriginReactor do
+    alias Ariadne.Flow.HandoffTest.Recorder
+    def reactor, do: Recorder.reactor("from-origin", %{start_after_position: 0})
+  end
+
+  defmodule FromPositionReactor do
+    alias Ariadne.Flow.HandoffTest.Recorder
+    def reactor, do: Recorder.reactor("from-position", %{start_after_position: 1})
+  end
+
+  defmodule BoomFromOriginReactor do
+    alias Ariadne.Flow.HandoffTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "boom-from-origin", filter: %{types: [CountEvent]}, start_after_position: 0},
+        fn _event, _metadata -> {:error, :kaboom} end
+      )
+    end
   end
 
   defmodule SyncReactor do
@@ -147,6 +172,13 @@ defmodule Ariadne.Flow.HandoffTest do
     |> Handoff.hand_off(store, events)
   end
 
+  defp catch_up(reactors, store, engine \\ @inline, attrs \\ %{}) do
+    attrs
+    |> Map.merge(%{reactors: reactors, engine: engine})
+    |> Handoff.new()
+    |> Handoff.catch_up(store)
+  end
+
   describe "new/1" do
     test "normalizes a bare engine module to a {module, opts} pair" do
       assert %Handoff{engine: {RecordingEngine, []}} =
@@ -215,6 +247,161 @@ defmodule Ariadne.Flow.HandoffTest do
 
       Enum.each(1..total, fn _ -> assert_received {:got, "counts", _, _} end)
       refute_received {:got, "counts", _, _}
+    end
+  end
+
+  describe "hand_off/3 resolves the reactor's start_after_position" do
+    test "starts a :head reactor right before the events it is handed" do
+      store = Store.InMemory.init()
+      _earlier = append(store)
+      events = append(store)
+
+      assert :ok = hand_off([CountsReactor], store, events, {RecordingEngine, result: :ok})
+
+      assert_received {:engine_run, %ReactorRun{start_after_position: 1}, _store, _opts}
+    end
+
+    test "passes a declared position through, so a first run picks up the history it asked for" do
+      store = inbox_store()
+      _earlier = append(store)
+      events = append(store)
+
+      assert :ok = hand_off([FromOriginReactor], store, events)
+
+      assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
+      assert_received {:got, "from-origin", %CountEvent{count: 2}, _}
+    end
+
+    test "starts a declared position where the reactor asked, not where the dispatch begins" do
+      store = inbox_store()
+      _earlier = append(store)
+      _earlier = append(store)
+      events = append(store)
+
+      assert :ok = hand_off([FromPositionReactor], store, events)
+
+      assert_received {:got, "from-position", %CountEvent{count: 2}, _}
+      assert_received {:got, "from-position", %CountEvent{count: 3}, _}
+      refute_received {:got, "from-position", %CountEvent{count: 1}, _}
+    end
+  end
+
+  describe "catch_up/2" do
+    test "returns :ok when there are no reactors" do
+      store = inbox_store()
+      _events = append(store)
+
+      assert :ok = catch_up([], store)
+    end
+
+    test "drives a reactor over the history it declared, with no dispatch to hand it events" do
+      store = inbox_store()
+      _events = append(store)
+      _events = append(store)
+
+      assert :ok = catch_up([FromOriginReactor], store)
+
+      assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
+      assert_received {:got, "from-origin", %CountEvent{count: 2}, _}
+    end
+
+    test "is a no-op for a reactor that is already up to date" do
+      store = inbox_store()
+      events = append(store)
+
+      assert :ok = hand_off([FromOriginReactor], store, events)
+      assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
+
+      assert :ok = catch_up([FromOriginReactor], store)
+
+      refute_received {:got, "from-origin", _, _}
+    end
+
+    test "resumes a :head reactor from its checkpoint once a dispatch has run it" do
+      store = inbox_store()
+      events = append(store)
+
+      assert :ok = hand_off([CountsReactor], store, events)
+      assert_received {:got, "counts", %CountEvent{count: 1}, _}
+
+      _out_of_band = append(store)
+
+      assert :ok = catch_up([CountsReactor], store)
+
+      assert_received {:got, "counts", %CountEvent{count: 2}, _}
+    end
+
+    test "skips a checkpoint-less :head reactor, which has nothing to catch up on yet" do
+      store = inbox_store()
+      _events = append(store)
+
+      assert :ok = catch_up([CountsReactor], store, {RecordingEngine, result: :ok})
+
+      refute_received {:engine_run, _reactor_run, _store, _opts}
+      assert nil == Store.checkpoint(store, "counts")
+    end
+
+    test "collects failures into an error value rather than raising" do
+      store = inbox_store()
+      _events = append(store)
+
+      assert {:error,
+              %ReactorError{
+                failures: [%{name: "boom-from-origin", position: position, reason: :kaboom}]
+              }} = catch_up([BoomFromOriginReactor, FromOriginReactor], store)
+
+      assert is_integer(position)
+      assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
+    end
+
+    test "hands the engine one run per reactor, carrying the metadata and nesting it is given" do
+      store = Store.InMemory.init()
+      _events = append(store)
+
+      assert :ok =
+               catch_up(
+                 [FromOriginReactor],
+                 store,
+                 {RecordingEngine, result: :ok, foo: :bar},
+                 %{metadata: %{"tenant_id" => "acme"}, nested: true}
+               )
+
+      assert_received {:engine_run, reactor_run, ^store, opts}
+
+      assert %ReactorRun{
+               reactor: FromOriginReactor,
+               start_after_position: 0,
+               metadata: %{"tenant_id" => "acme"},
+               nested: true
+             } = reactor_run
+
+      assert opts == [result: :ok, foo: :bar]
+    end
+
+    test "delivers each event exactly once when a hand-off and catch-ups race the same reactor" do
+      store = inbox_store()
+      total = 20
+      events = Enum.flat_map(1..total, fn _ -> append(store) end)
+
+      drivers = [
+        fn -> hand_off([FromOriginReactor], store, events) end,
+        fn -> catch_up([FromOriginReactor], store) end,
+        fn -> catch_up([FromOriginReactor], store) end
+      ]
+
+      results =
+        drivers
+        |> Enum.map(&Task.async/1)
+        |> Task.await_many()
+
+      assert Enum.all?(results, &(&1 == :ok))
+
+      Enum.each(1..total, fn count ->
+        assert_receive {:got, "from-origin", %CountEvent{count: ^count}, _}
+      end)
+
+      refute_receive {:got, "from-origin", _, _}
+      assert total == Store.checkpoint(store, "from-origin")
     end
   end
 
