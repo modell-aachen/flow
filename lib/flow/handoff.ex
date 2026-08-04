@@ -1,5 +1,6 @@
-defmodule Ariadne.Flow.Reactions do
+defmodule Ariadne.Flow.Handoff do
   @moduledoc false
+  alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
@@ -10,17 +11,17 @@ defmodule Ariadne.Flow.Reactions do
   def new(%{reactors: reactors, engine: engine} = attrs) do
     %__MODULE__{
       reactors: reactors,
-      engine: normalize_engine(engine),
+      engine: ReactorEngine.normalize(engine),
       metadata: Map.get(attrs, :metadata, %{}),
       nested: Map.get(attrs, :nested, false)
     }
   end
 
-  def react(%__MODULE__{}, %Store{}, []), do: :ok
-  def react(%__MODULE__{reactors: []}, %Store{}, _events), do: :ok
+  def hand_off(%__MODULE__{}, %Store{}, []), do: :ok
+  def hand_off(%__MODULE__{reactors: []}, %Store{}, _events), do: :ok
 
-  def react(%__MODULE__{} = reactions, %Store{} = store, events) do
-    %{reactors: reactors, engine: {engine, opts}, metadata: metadata, nested: nested} = reactions
+  def hand_off(%__MODULE__{} = handoff, %Store{} = store, events) do
+    %{reactors: reactors, engine: {engine, opts}, metadata: metadata, nested: nested} = handoff
     start_after_position = lowest_position(events) - 1
 
     failures =
@@ -38,9 +39,6 @@ defmodule Ariadne.Flow.Reactions do
 
     if failures == [], do: :ok, else: {:error, %ReactorError{failures: failures}}
   end
-
-  def normalize_engine({module, opts}) when is_atom(module) and is_list(opts), do: {module, opts}
-  def normalize_engine(module) when is_atom(module), do: {module, []}
 
   defp failures(:ok, _reactor_run), do: []
   defp failures({:error, %ReactorError{failures: failures}}, _reactor_run), do: failures

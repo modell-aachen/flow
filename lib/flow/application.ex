@@ -6,7 +6,7 @@ defmodule Ariadne.Flow.Application do
   alias Ariadne.Flow.Consistency
   alias Ariadne.Flow.ConsistencyTimeoutError
   alias Ariadne.Flow.EventReducer
-  alias Ariadne.Flow.Reactions
+  alias Ariadne.Flow.Handoff
   alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.Store
@@ -17,7 +17,7 @@ defmodule Ariadne.Flow.Application do
     %__MODULE__{
       store: store,
       reactors: Map.get(attrs, :reactors, []),
-      engine: Reactions.normalize_engine(Map.get(attrs, :engine, ReactorEngine.Inline))
+      engine: ReactorEngine.normalize(Map.get(attrs, :engine, ReactorEngine.Inline))
     }
   end
 
@@ -32,8 +32,8 @@ defmodule Ariadne.Flow.Application do
         created_at: Keyword.get(opts, :created_at)
       })
 
-    reactions =
-      Reactions.new(%{reactors: reactors, engine: engine, metadata: metadata, nested: nested})
+    handoff =
+      Handoff.new(%{reactors: reactors, engine: engine, metadata: metadata, nested: nested})
 
     consistency =
       Consistency.new(%{
@@ -43,7 +43,7 @@ defmodule Ariadne.Flow.Application do
       })
 
     store
-    |> append_and_react(command_handler, reactions)
+    |> append_and_hand_off(command_handler, handoff)
     |> raise_reactor_failure()
     |> await(consistency, store)
   end
@@ -60,10 +60,10 @@ defmodule Ariadne.Flow.Application do
     EventReducer.evaluate(event_reducer, store).result
   end
 
-  defp append_and_react(store, command_handler, reactions) do
+  defp append_and_hand_off(store, command_handler, handoff) do
     Store.transaction(store, fn ->
       with {:ok, %{events: events} = result} <- CommandHandler.handle(command_handler, store),
-           :ok <- Reactions.react(reactions, store, events) do
+           :ok <- Handoff.hand_off(handoff, store, events) do
         {:ok, result}
       end
     end)

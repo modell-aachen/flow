@@ -1,9 +1,9 @@
-defmodule Ariadne.Flow.ReactionsTest do
+defmodule Ariadne.Flow.HandoffTest do
   use ExUnit.Case, async: true
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
+  alias Ariadne.Flow.Handoff
   alias Ariadne.Flow.Projection
-  alias Ariadne.Flow.Reactions
   alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
@@ -17,7 +17,7 @@ defmodule Ariadne.Flow.ReactionsTest do
   end
 
   defmodule Recorder do
-    alias Ariadne.Flow.ReactionsTest.CountEvent
+    alias Ariadne.Flow.HandoffTest.CountEvent
     alias Ariadne.Flow.Reactor
 
     def reactor(name) do
@@ -29,22 +29,22 @@ defmodule Ariadne.Flow.ReactionsTest do
   end
 
   defmodule CountsReactor do
-    alias Ariadne.Flow.ReactionsTest.Recorder
+    alias Ariadne.Flow.HandoffTest.Recorder
     def reactor, do: Recorder.reactor("counts")
   end
 
   defmodule AlphaReactor do
-    alias Ariadne.Flow.ReactionsTest.Recorder
+    alias Ariadne.Flow.HandoffTest.Recorder
     def reactor, do: Recorder.reactor("alpha")
   end
 
   defmodule BetaReactor do
-    alias Ariadne.Flow.ReactionsTest.Recorder
+    alias Ariadne.Flow.HandoffTest.Recorder
     def reactor, do: Recorder.reactor("beta")
   end
 
   defmodule SyncReactor do
-    alias Ariadne.Flow.ReactionsTest.CountEvent
+    alias Ariadne.Flow.HandoffTest.CountEvent
     alias Ariadne.Flow.Reactor
 
     def reactor do
@@ -59,7 +59,7 @@ defmodule Ariadne.Flow.ReactionsTest do
   end
 
   defmodule BoomSyncReactor do
-    alias Ariadne.Flow.ReactionsTest.CountEvent
+    alias Ariadne.Flow.HandoffTest.CountEvent
     alias Ariadne.Flow.Reactor
 
     def reactor do
@@ -71,7 +71,7 @@ defmodule Ariadne.Flow.ReactionsTest do
   end
 
   defmodule BoomReactor do
-    alias Ariadne.Flow.ReactionsTest.CountEvent
+    alias Ariadne.Flow.HandoffTest.CountEvent
     alias Ariadne.Flow.Reactor
 
     def reactor do
@@ -140,47 +140,47 @@ defmodule Ariadne.Flow.ReactionsTest do
     events
   end
 
-  defp react(reactors, store, events, engine \\ @inline, attrs \\ %{}) do
+  defp hand_off(reactors, store, events, engine \\ @inline, attrs \\ %{}) do
     attrs
     |> Map.merge(%{reactors: reactors, engine: engine})
-    |> Reactions.new()
-    |> Reactions.react(store, events)
+    |> Handoff.new()
+    |> Handoff.hand_off(store, events)
   end
 
   describe "new/1" do
     test "normalizes a bare engine module to a {module, opts} pair" do
-      assert %Reactions{engine: {RecordingEngine, []}} =
-               Reactions.new(%{reactors: [CountsReactor], engine: RecordingEngine})
+      assert %Handoff{engine: {RecordingEngine, []}} =
+               Handoff.new(%{reactors: [CountsReactor], engine: RecordingEngine})
     end
 
     test "keeps an explicit {module, opts} engine, defaulting metadata and nested" do
-      assert %Reactions{engine: {RecordingEngine, [foo: :bar]}, metadata: %{}, nested: false} =
-               Reactions.new(%{reactors: [CountsReactor], engine: {RecordingEngine, foo: :bar}})
+      assert %Handoff{engine: {RecordingEngine, [foo: :bar]}, metadata: %{}, nested: false} =
+               Handoff.new(%{reactors: [CountsReactor], engine: {RecordingEngine, foo: :bar}})
     end
   end
 
-  describe "react/3 short-circuits" do
+  describe "hand_off/3 short-circuits" do
     test "returns :ok without touching reactors when there are no events" do
       store = inbox_store()
 
-      assert :ok = react([BoomReactor], store, [])
+      assert :ok = hand_off([BoomReactor], store, [])
     end
 
     test "returns :ok when there are no reactors" do
       store = inbox_store()
       events = append(store)
 
-      assert :ok = react([], store, events)
+      assert :ok = hand_off([], store, events)
     end
   end
 
-  describe "react/3 drives reactors with only a store, reactors and events" do
+  describe "hand_off/3 drives reactors with only a store, reactors and events" do
     test "runs every reactor inline under the default engine over the given events" do
       store = inbox_store()
       events = append(store)
 
       assert :ok =
-               react([AlphaReactor, BetaReactor], store, events)
+               hand_off([AlphaReactor, BetaReactor], store, events)
 
       assert_received {:got, "alpha", %CountEvent{count: 1}, _}
       assert_received {:got, "beta", %CountEvent{count: 1}, _}
@@ -191,7 +191,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       _earlier = append(store)
       events = append(store)
 
-      assert :ok = react([CountsReactor], store, events)
+      assert :ok = hand_off([CountsReactor], store, events)
 
       assert_received {:got, "counts", %CountEvent{count: 2}, _}
       refute_received {:got, "counts", %CountEvent{count: 1}, _}
@@ -211,20 +211,20 @@ defmodule Ariadne.Flow.ReactionsTest do
       {:ok, %{events: events}} =
         CommandHandler.handle(CommandHandler.new(%{command: bulk_command}), store)
 
-      assert :ok = react([CountsReactor], store, events)
+      assert :ok = hand_off([CountsReactor], store, events)
 
       Enum.each(1..total, fn _ -> assert_received {:got, "counts", _, _} end)
       refute_received {:got, "counts", _, _}
     end
   end
 
-  describe "react/3 continues past a failure" do
+  describe "hand_off/3 continues past a failure" do
     test "runs the reactors after a failing one, in declaration order" do
       store = inbox_store()
       events = append(store)
 
       assert {:error, %ReactorError{failures: [%{name: "boom"}]}} =
-               react(
+               hand_off(
                  [BoomReactor, AlphaReactor, BetaReactor],
                  store,
                  events
@@ -239,7 +239,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       events = append(store)
 
       assert {:error, %ReactorError{failures: failures}} =
-               react(
+               hand_off(
                  [BoomReactor, AlphaReactor, BoomSyncReactor],
                  store,
                  events
@@ -255,19 +255,19 @@ defmodule Ariadne.Flow.ReactionsTest do
 
       assert {:error,
               %ReactorError{failures: [%{name: "boom", position: position, reason: :kaboom}]}} =
-               react([BoomReactor], store, events)
+               hand_off([BoomReactor], store, events)
 
       assert is_integer(position)
     end
   end
 
-  describe "react/3 leaves the sync/async decision to the engine" do
+  describe "hand_off/3 leaves the sync/async decision to the engine" do
     test "hands sync and async reactors alike to the engine" do
       store = inbox_store()
       events = append(store)
 
       assert :ok =
-               react(
+               hand_off(
                  [SyncReactor, CountsReactor],
                  store,
                  events,
@@ -284,7 +284,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       events = append(store)
 
       assert {:error, %ReactorError{failures: [%{name: "boom-sync", reason: :kaboom}]}} =
-               react(
+               hand_off(
                  [BoomSyncReactor, CountsReactor],
                  store,
                  events,
@@ -297,7 +297,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       events = append(store)
 
       assert {:error, %ReactorError{}} =
-               react(
+               hand_off(
                  [BoomSyncReactor, CountsReactor],
                  store,
                  events,
@@ -308,12 +308,12 @@ defmodule Ariadne.Flow.ReactionsTest do
     end
   end
 
-  describe "react/3 engine contract" do
+  describe "hand_off/3 engine contract" do
     test "accepts a bare engine module, normalizing it to a {module, opts} pair" do
       store = Store.InMemory.init()
       events = append(store)
 
-      assert :ok = react([CountsReactor], store, events, RecordingEngine)
+      assert :ok = hand_off([CountsReactor], store, events, RecordingEngine)
 
       assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, ^store, []}
     end
@@ -323,7 +323,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       events = append(store)
 
       assert :ok =
-               react(
+               hand_off(
                  [CountsReactor],
                  store,
                  events,
@@ -340,7 +340,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       events = append(store)
 
       assert :ok =
-               react(
+               hand_off(
                  [CountsReactor],
                  store,
                  events,
@@ -358,7 +358,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       events = append(store)
 
       assert :ok =
-               react(
+               hand_off(
                  [CountsReactor],
                  store,
                  events,
@@ -380,7 +380,7 @@ defmodule Ariadne.Flow.ReactionsTest do
                   %{name: "alpha", position: nil, reason: :engine_boom}
                 ]
               }} =
-               react(
+               hand_off(
                  [CountsReactor, AlphaReactor],
                  store,
                  events,
