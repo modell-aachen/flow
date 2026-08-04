@@ -79,6 +79,24 @@ defmodule Ariadne.Flow.ReactorTest do
     assert :ok == Reactor.handle(reactor, envelope(%ExampleEvent{id: 1}))
   end
 
+  test "matches?/2 answers whether the reactor reacts to an event at all" do
+    reactor = build_reactor(fn _, _ -> :ok end)
+
+    assert Reactor.matches?(reactor, envelope(%ExampleEvent{id: 1}))
+    refute Reactor.matches?(reactor, envelope(%UnrelatedEvent{}))
+  end
+
+  test "matches?/2 takes the filter's tags into account" do
+    reactor =
+      Reactor.new(
+        %{name: "selective", filter: %{types: [ExampleEvent], tags: ["thing:special"]}},
+        fn _, _ -> :ok end
+      )
+
+    refute Reactor.matches?(reactor, envelope(%ExampleEvent{id: 1}))
+    assert Reactor.matches?(reactor, envelope(%ExampleEvent{id: "special"}))
+  end
+
   test "new/2 defaults start_after_position to 0" do
     assert %Reactor{start_after_position: 0} = build_reactor(fn _, _ -> :ok end)
   end

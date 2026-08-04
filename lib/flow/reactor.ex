@@ -20,11 +20,17 @@ defmodule Ariadne.Flow.Reactor do
   def query(%__MODULE__{filter: filter}), do: [filter]
 
   def handle(
-        %__MODULE__{filter: filter, handler: handler},
+        %__MODULE__{handler: handler} = reactor,
         %{event: event, metadata: metadata} = envelope
       ) do
-    if Query.Item.matches?(filter, envelope), do: handler.(event, metadata), else: :ok
+    if matches?(reactor, envelope), do: handler.(event, metadata), else: :ok
   end
+
+  # Whether this reactor reacts to the event at all. The stored `type` and `tags` the
+  # envelope carries are what the filter matches on, so an event can be tested against a
+  # reactor without going back to the store — which is how a caller works out which of a
+  # dispatch's events a reactor is ever going to process.
+  def matches?(%__MODULE__{filter: filter}, envelope), do: Query.Item.matches?(filter, envelope)
 
   defp new_filter(filter) do
     case Query.Item.new(filter) do

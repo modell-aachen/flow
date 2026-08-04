@@ -8,7 +8,7 @@ defmodule Ariadne.Flow.ReactorRun do
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @enforce_keys [:reactor, :start_after_position]
-  defstruct [:reactor, :start_after_position, metadata: %{}]
+  defstruct [:reactor, :start_after_position, metadata: %{}, nested: false]
 
   def new(%{reactor: reactor_module} = attrs) do
     reactor = reactor_module.reactor()
@@ -16,14 +16,28 @@ defmodule Ariadne.Flow.ReactorRun do
     %__MODULE__{
       reactor: reactor_module,
       start_after_position: Map.get(attrs, :start_after_position, reactor.start_after_position),
-      metadata: Map.get(attrs, :metadata, %{})
+      metadata: Map.get(attrs, :metadata, %{}),
+      nested: Map.get(attrs, :nested, false)
     }
   end
 
+  # "The dispatch will not return before this run's checkpoint has passed the events it
+  # appended" — an intent about the dispatch, not about where the run executes. An engine
+  # may defer a sync run onto its job system, as long as the run is durably enqueued in
+  # the dispatch's transaction: the wait is on the checkpoint, which the job advances.
   def sync?(%__MODULE__{reactor: reactor_module}), do: reactor_module.reactor().sync
+
+  # A sync run in a dispatch nested inside an outer transaction is the one that cannot be
+  # deferred: its events and the engine's job row stay invisible until the outer commit, so
+  # nothing could advance the checkpoint while the dispatch waits on it. Executing such a
+  # run inline is the only place its confirmation can come from.
+  def inline?(%__MODULE__{nested: nested} = reactor_run), do: nested and sync?(reactor_run)
 
   def name(%__MODULE__{reactor: reactor_module}), do: reactor_module.reactor().name
 
+  # The nesting flag is deliberately not dumped: a run being serialised is on its way to a
+  # job system, which executes it outside the dispatch's transaction whatever that dispatch
+  # was nested in.
   def dump(%__MODULE__{reactor: reactor, start_after_position: position, metadata: metadata}) do
     %{
       "reactor" => Atom.to_string(reactor),

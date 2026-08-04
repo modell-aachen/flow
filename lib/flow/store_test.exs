@@ -713,6 +713,95 @@ defmodule Ariadne.Flow.StoreTest do
     end
   end
 
+  describe "checkpoint/2" do
+    @checkpoint_query [%{types: ["ItemAdded"]}]
+
+    test "is nil for a reactor that has never run", %{store: store} do
+      assert Store.checkpoint(store, "echo") == nil
+    end
+
+    test "is the position the reactor last consumed up to", %{store: store} do
+      append!(store, "ItemAdded")
+      position = append_position!(store, "ItemAdded")
+
+      consume!(store, "echo", @checkpoint_query)
+
+      assert Store.checkpoint(store, "echo") == position
+    end
+
+    test "advances as the reactor consumes newly appended events", %{store: store} do
+      first = append_position!(store, "ItemAdded")
+      consume!(store, "echo", @checkpoint_query)
+      assert Store.checkpoint(store, "echo") == first
+
+      second = append_position!(store, "ItemAdded")
+      consume!(store, "echo", @checkpoint_query)
+
+      assert Store.checkpoint(store, "echo") == second
+    end
+
+    test "stays put on events the reactor's query does not match", %{store: store} do
+      position = append_position!(store, "ItemAdded")
+      consume!(store, "echo", @checkpoint_query)
+
+      append!(store, "ItemRemoved")
+      consume!(store, "echo", @checkpoint_query)
+
+      assert Store.checkpoint(store, "echo") == position
+    end
+
+    test "is kept per reactor name", %{store: store} do
+      append!(store, "ItemAdded")
+      consume!(store, "echo", @checkpoint_query)
+
+      assert Store.checkpoint(store, "other") == nil
+    end
+
+    test "is where a reactor stands even when its run consumed nothing", %{store: store} do
+      consume!(store, "echo", @checkpoint_query)
+
+      assert Store.checkpoint(store, "echo") == 0
+    end
+  end
+
+  describe "in_transaction?/1" do
+    test "is false outside a transaction", %{store: store} do
+      refute Store.in_transaction?(store)
+    end
+
+    test "is true inside one", %{store: store} do
+      assert :ok =
+               Store.transaction(store, fn ->
+                 assert Store.in_transaction?(store)
+                 :ok
+               end)
+    end
+
+    test "is true inside a transaction nested in another", %{store: store} do
+      assert :ok =
+               Store.transaction(store, fn ->
+                 Store.transaction(store, fn ->
+                   assert Store.in_transaction?(store)
+                   :ok
+                 end)
+               end)
+    end
+
+    test "is false again after the transaction returns", %{store: store} do
+      assert :ok = Store.transaction(store, fn -> :ok end)
+
+      refute Store.in_transaction?(store)
+    end
+
+    test "is false again after the transaction raises", %{store: store} do
+      assert_raise RuntimeError, "boom", fn ->
+        Store.transaction(store, fn -> raise "boom" end)
+      end
+
+      refute Store.in_transaction?(store)
+    end
+  end
+
   describe "transaction/2" do
     @item_added_query [%{types: ["ItemAdded"]}]
 
@@ -793,6 +882,18 @@ defmodule Ariadne.Flow.StoreTest do
   defp append_position!(store, type, tags \\ []) do
     {:ok, %{events: [%SequencedEvent{position: position}]}} = append!(store, type, tags)
     position
+  end
+
+  defp consume!(store, name, query) do
+    %ConsumeResult{} =
+      Store.consume(
+        store,
+        StoredEventReactor.new(%{
+          name: name,
+          query: query,
+          handler: fn events -> {:ok, length(events)} end
+        })
+      )
   end
 
   defp recording_handler(target_pid, name) do

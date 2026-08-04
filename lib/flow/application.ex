@@ -3,6 +3,8 @@ defmodule Ariadne.Flow.Application do
   alias Ariadne.Flow.AppendConditionError
   alias Ariadne.Flow.CommandError
   alias Ariadne.Flow.CommandHandler
+  alias Ariadne.Flow.Consistency
+  alias Ariadne.Flow.ConsistencyTimeoutError
   alias Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Reactions
   alias Ariadne.Flow.ReactorEngine
@@ -20,16 +22,27 @@ defmodule Ariadne.Flow.Application do
   end
 
   def dispatch(%__MODULE__{store: store, reactors: reactors, engine: engine}, command, opts \\ []) do
-    metadata = Keyword.get(opts, :metadata, %{})
+    # One value describing this dispatch, read by both halves of the reaction: the pass puts
+    # it on every run it builds, and the await reads the nesting off it. `in_transaction?` is
+    # asked before the dispatch opens its own transaction, because inside one the answer is
+    # always yes — what decides whether a sync run can be confirmed from outside is the
+    # transaction the *caller* brought, not the one the dispatch is about to open.
+    dispatch = %{
+      metadata: Keyword.get(opts, :metadata, %{}),
+      nested: Store.in_transaction?(store)
+    }
+
+    consistency = Consistency.new(reactors, dispatch, opts)
 
     store
     |> Store.transaction(fn ->
       with {:ok, %{events: events} = result} <- CommandHandler.handle(command, store, opts),
-           :ok <- Reactions.react(reactors, store, events, metadata, engine) do
+           :ok <- Reactions.react(reactors, store, events, engine, dispatch) do
         {:ok, result}
       end
     end)
     |> raise_reactor_failure()
+    |> confirm(consistency, store)
   end
 
   def dispatch!(%__MODULE__{} = application, command, opts \\ []) do
@@ -49,4 +62,17 @@ defmodule Ariadne.Flow.Application do
   # raising inside would roll back the events and the failed reactor's checkpoint.
   defp raise_reactor_failure({:error, %ReactorError{} = error}), do: raise(error)
   defp raise_reactor_failure(result), do: result
+
+  # The wait belongs here, after the commit, and only here: while the dispatch's own
+  # transaction is open its events are invisible, so no sync reactor's checkpoint could
+  # pass them. A reactor that already failed the pass has raised by now — a definitive
+  # failure says more than a wait that would only ever run out.
+  defp confirm({:ok, %{events: events}} = result, consistency, store) do
+    case Consistency.await(consistency, store, events) do
+      :ok -> result
+      {:error, %ConsistencyTimeoutError{} = error} -> raise error
+    end
+  end
+
+  defp confirm(result, _consistency, _store), do: result
 end

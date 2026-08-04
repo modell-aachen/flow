@@ -26,6 +26,8 @@ defmodule Ariadne.Flow.Store.InMemory.State do
 
   def count(%__MODULE__{events: events}), do: length(events)
 
+  def checkpoint(%__MODULE__{checkpoints: checkpoints}, name), do: Map.get(checkpoints, name)
+
   def append(%__MODULE__{} = state, events, opts) when is_list(events) and is_list(opts) do
     append_condition = Keyword.get(opts, :condition)
 
@@ -50,7 +52,7 @@ defmodule Ariadne.Flow.Store.InMemory.State do
         batch_size
       )
       when is_integer(batch_size) and batch_size > 0 do
-    prior_position = Map.get(state.checkpoints, name, start_after_position)
+    prior_position = checkpoint(state, name) || start_after_position
 
     %{events: events} = read(state, query, after: prior_position, limit: batch_size + 1)
 

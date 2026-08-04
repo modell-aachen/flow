@@ -40,8 +40,23 @@ defmodule Ariadne.Flow.Store do
     module.consume(config, %{reactor | query: Query.new(reactor.query)})
   end
 
+  @doc """
+  Returns the position the reactor named `name` has checkpointed at, `nil` when it has
+  none yet.
+  """
+  def checkpoint(%__MODULE__{module: module, config: config}, name) when is_binary(name) do
+    module.checkpoint(config, name)
+  end
+
   def transaction(%__MODULE__{module: module, config: config}, fun) when is_function(fun, 0) do
     module.transaction(config, fun)
+  end
+
+  @doc """
+  Whether the calling process is already inside a transaction on this store.
+  """
+  def in_transaction?(%__MODULE__{module: module, config: config}) do
+    module.in_transaction?(config)
   end
 
   def dump(%__MODULE__{module: module, config: config}) do

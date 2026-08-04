@@ -142,14 +142,14 @@ defmodule Ariadne.Flow.ReactionsTest do
     test "returns :ok without touching reactors when there are no events" do
       store = inbox_store()
 
-      assert :ok = Reactions.react([BoomReactor], store, [], %{}, @inline)
+      assert :ok = Reactions.react([BoomReactor], store, [], @inline, %{})
     end
 
     test "returns :ok when there are no reactors" do
       store = inbox_store()
       events = append(store)
 
-      assert :ok = Reactions.react([], store, events, %{}, @inline)
+      assert :ok = Reactions.react([], store, events, @inline, %{})
     end
   end
 
@@ -158,7 +158,8 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = inbox_store()
       events = append(store)
 
-      assert :ok = Reactions.react([AlphaReactor, BetaReactor], store, events, %{}, @inline)
+      assert :ok =
+               Reactions.react([AlphaReactor, BetaReactor], store, events, @inline, %{})
 
       assert_received {:got, "alpha", %CountEvent{count: 1}, _}
       assert_received {:got, "beta", %CountEvent{count: 1}, _}
@@ -169,7 +170,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       _earlier = append(store)
       events = append(store)
 
-      assert :ok = Reactions.react([CountsReactor], store, events, %{}, @inline)
+      assert :ok = Reactions.react([CountsReactor], store, events, @inline, %{})
 
       assert_received {:got, "counts", %CountEvent{count: 2}, _}
       refute_received {:got, "counts", %CountEvent{count: 1}, _}
@@ -188,7 +189,7 @@ defmodule Ariadne.Flow.ReactionsTest do
 
       {:ok, %{events: events}} = CommandHandler.handle(bulk_command, store)
 
-      assert :ok = Reactions.react([CountsReactor], store, events, %{}, @inline)
+      assert :ok = Reactions.react([CountsReactor], store, events, @inline, %{})
 
       Enum.each(1..total, fn _ -> assert_received {:got, "counts", _, _} end)
       refute_received {:got, "counts", _, _}
@@ -205,8 +206,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [BoomReactor, AlphaReactor, BetaReactor],
                  store,
                  events,
-                 %{},
-                 @inline
+                 @inline,
+                 %{}
                )
 
       assert_received {:got, "alpha", _, _}
@@ -222,8 +223,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [BoomReactor, AlphaReactor, BoomSyncReactor],
                  store,
                  events,
-                 %{},
-                 @inline
+                 @inline,
+                 %{}
                )
 
       assert [%{name: "boom", reason: :kaboom}, %{name: "boom-sync", reason: :kaboom}] = failures
@@ -236,7 +237,7 @@ defmodule Ariadne.Flow.ReactionsTest do
 
       assert {:error,
               %ReactorError{failures: [%{name: "boom", position: position, reason: :kaboom}]}} =
-               Reactions.react([BoomReactor], store, events, %{}, @inline)
+               Reactions.react([BoomReactor], store, events, @inline, %{})
 
       assert is_integer(position)
     end
@@ -252,8 +253,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [SyncReactor, CountsReactor],
                  store,
                  events,
-                 %{},
-                 {RecordingEngine, result: :ok}
+                 {RecordingEngine, result: :ok},
+                 %{}
                )
 
       assert_received {:engine_run, %ReactorRun{reactor: SyncReactor}, _, _}
@@ -270,8 +271,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [BoomSyncReactor, CountsReactor],
                  store,
                  events,
-                 %{},
-                 DeferringEngine
+                 DeferringEngine,
+                 %{}
                )
     end
 
@@ -284,8 +285,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [BoomSyncReactor, CountsReactor],
                  store,
                  events,
-                 %{},
-                 DeferringEngine
+                 DeferringEngine,
+                 %{}
                )
 
       assert_received {:deferred, %ReactorRun{reactor: CountsReactor}}
@@ -297,7 +298,7 @@ defmodule Ariadne.Flow.ReactionsTest do
       store = Store.InMemory.init()
       events = append(store)
 
-      assert :ok = Reactions.react([CountsReactor], store, events, %{}, RecordingEngine)
+      assert :ok = Reactions.react([CountsReactor], store, events, RecordingEngine, %{})
 
       assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, ^store, []}
     end
@@ -311,8 +312,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [CountsReactor],
                  store,
                  events,
-                 %{},
-                 {RecordingEngine, result: :ok, foo: :bar}
+                 {RecordingEngine, result: :ok, foo: :bar},
+                 %{}
                )
 
       assert_received {:engine_run, reactor_run, ^store, opts}
@@ -329,8 +330,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [CountsReactor],
                  store,
                  events,
-                 %{"tenant_id" => "acme", "trace_id" => "abc123"},
-                 {RecordingEngine, result: :ok}
+                 {RecordingEngine, result: :ok},
+                 %{metadata: %{"tenant_id" => "acme", "trace_id" => "abc123"}}
                )
 
       assert_received {:engine_run,
@@ -347,8 +348,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [CountsReactor],
                  store,
                  events,
-                 %{},
-                 {RecordingEngine, result: :ok}
+                 {RecordingEngine, result: :ok},
+                 %{}
                )
 
       assert_received {:engine_run, _payload, _store, _opts}
@@ -370,8 +371,8 @@ defmodule Ariadne.Flow.ReactionsTest do
                  [CountsReactor, AlphaReactor],
                  store,
                  events,
-                 %{},
-                 {RecordingEngine, result: {:error, :engine_boom}}
+                 {RecordingEngine, result: {:error, :engine_boom}},
+                 %{}
                )
 
       assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, _, _}
