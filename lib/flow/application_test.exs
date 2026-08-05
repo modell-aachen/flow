@@ -177,14 +177,11 @@ defmodule Ariadne.Flow.ApplicationTest do
   end
 
   defp count_command(increase) do
-    Composite.new(
-      %{count: num_counts_projection()},
-      fn
-        %{count: 3} -> {:error, :count_too_high}
-        %{count: count} -> {:ok, [%CountEvent{count: count + increase}]}
-      end
-    )
+    Composite.new(%{count: num_counts_projection()}, &decide_count(&1, increase))
   end
+
+  defp decide_count(%{count: 3}, _increase), do: {:error, :count_too_high}
+  defp decide_count(%{count: count}, increase), do: {:ok, [%CountEvent{count: count + increase}]}
 
   # The last event this appends is one no reactor here reacts to, so the dispatch's highest
   # position is past every sync reactor's own last matching event.
@@ -229,10 +226,27 @@ defmodule Ariadne.Flow.ApplicationTest do
 
   # Appending from inside the decide function lands between the command's read and
   # its append, which is the conflict the append condition guards against.
-  defp conflicting_count_command(store) do
-    Composite.new(%{count: num_counts_projection()}, fn %{count: count} ->
-      {:ok, _} = CommandHandler.handle(CommandHandler.new(%{command: count_command(1)}), store)
-      {:ok, [%CountEvent{count: count + 1}]}
+  defp conflicting_count_command(store), do: conflicting_count_command(store, :always)
+
+  # The same conflict, but only for the first `conflicts` attempts — the ones after that
+  # read the events those appends left behind and decide from them.
+  defp conflicting_count_command(store, conflicts) do
+    {:ok, remaining} = Agent.start_link(fn -> conflicts end)
+
+    Composite.new(%{count: num_counts_projection()}, fn state ->
+      if conflict?(remaining) do
+        {:ok, _} = CommandHandler.handle(CommandHandler.new(%{command: count_command(1)}), store)
+      end
+
+      decide_count(state, 1)
+    end)
+  end
+
+  defp conflict?(remaining) do
+    Agent.get_and_update(remaining, fn
+      :always -> {true, :always}
+      0 -> {false, 0}
+      count -> {true, count - 1}
     end)
   end
 
@@ -390,6 +404,143 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:engine_run,
                        %ReactorRun{metadata: %{"tenant_id" => "acme", "trace_id" => "abc123"}},
                        _store, _opts}
+    end
+  end
+
+  describe "dispatch/3 retries an append conflict" do
+    test "appends the events the retry decided on, not the ones the conflicted attempt did" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 2}}]}} =
+               Application.dispatch(application, conflicting_count_command(store, 1))
+    end
+
+    test "returns the command's own refusal when the retry decides against the new events" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+      {:ok, _} = Application.dispatch(application, count_command(1))
+      {:ok, _} = Application.dispatch(application, count_command(1))
+
+      assert {:error, :count_too_high} =
+               Application.dispatch(application, conflicting_count_command(store, 1))
+    end
+
+    # A reactor starting from now starts at the head the *winning* attempt saw, so the
+    # events this dispatch lost to belong to whoever appended them, not to the retry.
+    test "hands the reactors the retry's events and nothing it conflicted with" do
+      store = inbox_store()
+      application = Application.new(%{store: store, reactors: [CountsReactor]})
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 2}}]}} =
+               Application.dispatch(application, conflicting_count_command(store, 1))
+
+      assert_received {:got, "counts", %CountEvent{count: 2}, _}
+      refute_received {:got, "counts", _, _}
+    end
+
+    test "gives up after the bound the caller asked for" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+
+      assert {:error, %AppendConditionError{}} =
+               Application.dispatch(application, conflicting_count_command(store, 1), attempts: 1)
+    end
+
+    test "raises before anything is written when the bound is not a positive integer" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+
+      assert_raise ArgumentError, ~r/:attempts must be a positive integer/, fn ->
+        Application.dispatch(application, count_command(1), attempts: 0)
+      end
+
+      assert %{events: []} = Store.read(store)
+    end
+
+    test "makes a single attempt when nested in the caller's transaction" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+
+      assert {:error, %AppendConditionError{}} =
+               Store.transaction(store, fn ->
+                 Application.dispatch(application, conflicting_count_command(store, 1),
+                   attempts: 3
+                 )
+               end)
+
+      assert %{events: [%{event: %Store.Event{data: %{"count" => 1}}}]} = Store.read(store)
+    end
+  end
+
+  describe "dispatch/3 telemetry" do
+    setup do
+      handler = "dispatch-telemetry-test-#{inspect(self())}"
+
+      :ok =
+        :telemetry.attach_many(
+          handler,
+          [
+            [:ariadne, :flow, :dispatch, :start],
+            [:ariadne, :flow, :dispatch, :stop],
+            [:ariadne, :flow, :dispatch, :exception]
+          ],
+          fn event, measurements, metadata, pid ->
+            send(pid, {:telemetry, List.last(event), measurements, metadata})
+          end,
+          self()
+        )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+    end
+
+    test "reports the one attempt an uncontended dispatch took" do
+      assert {:ok, _} = Application.dispatch(application(), count_command(1))
+
+      assert_received {:telemetry, :start, _, %{}}
+      assert_received {:telemetry, :stop, %{attempts: 1}, %{result: :ok}}
+    end
+
+    test "reports what a conflict cost, so a retry cannot hide the contention" do
+      store = inbox_store()
+
+      assert {:ok, _} =
+               Application.dispatch(
+                 Application.new(%{store: store}),
+                 conflicting_count_command(store, 1)
+               )
+
+      assert_received {:telemetry, :stop, %{attempts: 2}, %{result: :ok}}
+    end
+
+    test "reports a conflict the attempts could not resolve" do
+      store = inbox_store()
+
+      assert {:error, %AppendConditionError{}} =
+               Application.dispatch(
+                 Application.new(%{store: store}),
+                 conflicting_count_command(store)
+               )
+
+      assert_received {:telemetry, :stop, %{attempts: 3}, %{result: :conflict}}
+    end
+
+    test "reports a refused command as an error, having only attempted it once" do
+      store = inbox_store()
+      application = Application.new(%{store: store})
+      for _ <- 1..3, do: {:ok, _} = Application.dispatch(application, count_command(1))
+
+      assert {:error, :count_too_high} = Application.dispatch(application, count_command(1))
+
+      assert_received {:telemetry, :stop, %{attempts: 1}, %{result: :error}}
+    end
+
+    test "reports a reactor failure as an exception, the events being committed" do
+      assert_raise ReactorError, fn ->
+        Application.dispatch(application([BoomReactor]), count_command(1))
+      end
+
+      assert_received {:telemetry, :exception, _, %{kind: :error, reason: %ReactorError{}}}
     end
   end
 
