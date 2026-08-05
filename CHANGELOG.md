@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/modell-aachen/flow/compare/v0.5.0...v0.5.1) (2026-08-05)
+
+
+### Features
+
+* declare the type an event is stored under ([#22](https://github.com/modell-aachen/flow/issues/22)) ([8a04fcd](https://github.com/modell-aachen/flow/commit/8a04fcd63eba3ff5d13e81a8796998215b91b313))
+* retry a dispatch on append conflict ([#24](https://github.com/modell-aachen/flow/issues/24)) ([5e92c86](https://github.com/modell-aachen/flow/commit/5e92c86ac0c406771f3766f7b91967c21ab25d06))
+
 ## [0.5.0](https://github.com/modell-aachen/flow/compare/v0.4.0...v0.5.0) (2026-08-05)
 
 
