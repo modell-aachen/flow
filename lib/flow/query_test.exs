@@ -2,6 +2,13 @@ defmodule Ariadne.Flow.QueryTest do
   use ExUnit.Case, async: true
   alias Ariadne.Flow.Query
 
+  defmodule PinnedEvent do
+    @derive {Ariadne.Flow.Store.Event.Encoder, type: "query-test-pinned"}
+    defstruct [:label]
+
+    def tags(_), do: []
+  end
+
   test "Queries over every event normalise to a query over every event" do
     assert %Query{items: :all} == Query.new(:all)
   end
@@ -31,6 +38,13 @@ defmodule Ariadne.Flow.QueryTest do
 
     assert %Query{items: [%Query.Item{types: ["Ariadne.Flow.QueryTest"]}]} =
              Query.new([%{types: [Ariadne.Flow.QueryTest]}])
+  end
+
+  test "Query items serialize an event module to the type the event declares" do
+    assert %Query.Item{types: ["query-test-pinned"]} = Query.Item.new(%{types: [PinnedEvent]})
+
+    assert %Query{items: [%Query.Item{types: ["query-test-pinned"]}]} =
+             Query.new([%{types: [PinnedEvent]}])
   end
 
   test "Query items want every match unless they ask for only the last event" do

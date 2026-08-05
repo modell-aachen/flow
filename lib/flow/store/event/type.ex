@@ -1,0 +1,115 @@
+defmodule Ariadne.Flow.Store.Event.Type do
+  @moduledoc false
+  alias Ariadne.Flow.Store.Event.Encoder
+
+  @index {__MODULE__, :index}
+
+  def of(module) when is_atom(module) do
+    impl = Module.concat(Encoder, module)
+
+    if Code.ensure_loaded?(impl) and function_exported?(impl, :type, 0),
+      do: declared!(impl, module),
+      else: from_module_name(module)
+  end
+
+  def module!(type) when is_binary(type) do
+    case Map.fetch(cached_index(), type) do
+      {:ok, module} -> module
+      :error -> rediscover!(type)
+    end
+  end
+
+  def index(typed_modules) when is_list(typed_modules) do
+    Enum.reduce(typed_modules, %{}, fn {type, module}, index ->
+      case index do
+        %{^type => ^module} -> index
+        %{^type => taken_by} -> raise ArgumentError, duplicate_hint(type, taken_by, module)
+        index -> Map.put(index, type, module)
+      end
+    end)
+  end
+
+  defp from_module_name(module) do
+    module
+    |> Atom.to_string()
+    |> String.trim_leading("Elixir.")
+  end
+
+  defp declared!(impl, module) do
+    case impl.type() do
+      type when is_binary(type) -> type
+      other -> raise ArgumentError, not_a_string_hint(module, other)
+    end
+  end
+
+  defp cached_index do
+    case :persistent_term.get(@index, nil) do
+      nil -> build_index()
+      index -> index
+    end
+  end
+
+  defp rediscover!(type) do
+    case Map.fetch(build_index(), type) do
+      {:ok, module} -> module
+      :error -> raise ArgumentError, unknown_hint(type)
+    end
+  end
+
+  defp build_index do
+    index = index(Enum.map(event_modules(), &{of(&1), &1}))
+    :persistent_term.put(@index, index)
+
+    index
+  end
+
+  defp event_modules do
+    case Encoder.__protocol__(:impls) do
+      {:consolidated, modules} -> modules
+      :not_consolidated -> Enum.uniq(compiled_modules() ++ loaded_modules())
+    end
+  end
+
+  defp compiled_modules, do: Protocol.extract_impls(Encoder, :code.get_path())
+
+  defp loaded_modules do
+    for {module, _file} <- :code.all_loaded(),
+        function_exported?(module, :__impl__, 1),
+        module.__impl__(:protocol) == Encoder,
+        do: module.__impl__(:for)
+  end
+
+  defp unknown_hint(type) do
+    """
+    No event module declares the stored event type #{inspect(type)}.
+
+    Every type in the store has to resolve back to a module implementing \
+    Ariadne.Flow.Store.Event.Encoder — a type that resolves to none is history no \
+    version of the code can read. A renamed event module keeps its history by pinning \
+    the type it was stored under:
+
+        @derive {Ariadne.Flow.Store.Event.Encoder, type: #{inspect(type)}}
+    """
+  end
+
+  defp duplicate_hint(type, taken_by, module) do
+    """
+    #{inspect(taken_by)} and #{inspect(module)} both declare the stored event type \
+    #{inspect(type)}.
+
+    A stored type names one event module, or reading it back would be a guess between \
+    them. Give each of them a type of its own.
+    """
+  end
+
+  defp not_a_string_hint(module, type) do
+    """
+    #{inspect(module)} declares the stored event type #{inspect(type)}, which is not a \
+    string.
+
+    The type is the name the event is stored under:
+
+        @derive {Ariadne.Flow.Store.Event.Encoder, type: "#{from_module_name(module)}"}
+    """
+  end
+end

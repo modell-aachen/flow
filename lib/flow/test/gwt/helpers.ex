@@ -2,8 +2,8 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
   import ExUnit.Assertions
 
   alias Ariadne.Flow.Reactor
-  alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.Event.Encoder
+  alias Ariadne.Flow.Store.Event.Type
 
   def given(events) do
     Enum.map(events, fn
@@ -25,7 +25,7 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
     %{
       event: Encoder.decode(event, store_data, %{}),
       metadata: metadata,
-      type: Codec.serialize_type(type),
+      type: Type.of(type),
       tags: tags
     }
   end
