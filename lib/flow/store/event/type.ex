@@ -7,7 +7,7 @@ defmodule Ariadne.Flow.Store.Event.Type do
   def of(module) when is_atom(module) do
     impl = Module.concat(Encoder, module)
 
-    if Code.ensure_loaded?(impl) and function_exported?(impl, :type, 0),
+    if declares_type?(impl),
       do: declared!(impl, module),
       else: from_module_name(module)
   end
@@ -27,6 +27,10 @@ defmodule Ariadne.Flow.Store.Event.Type do
         index -> Map.put(index, type, module)
       end
     end)
+  end
+
+  defp declares_type?(impl) do
+    match?({:module, _}, Code.ensure_compiled(impl)) and function_exported?(impl, :type, 0)
   end
 
   defp from_module_name(module) do
@@ -63,14 +67,14 @@ defmodule Ariadne.Flow.Store.Event.Type do
     index
   end
 
-  defp event_modules do
+  defp event_modules, do: Enum.uniq(compiled_modules() ++ loaded_modules())
+
+  defp compiled_modules do
     case Encoder.__protocol__(:impls) do
       {:consolidated, modules} -> modules
-      :not_consolidated -> Enum.uniq(compiled_modules() ++ loaded_modules())
+      :not_consolidated -> Protocol.extract_impls(Encoder, :code.get_path())
     end
   end
-
-  defp compiled_modules, do: Protocol.extract_impls(Encoder, :code.get_path())
 
   defp loaded_modules do
     for {module, _file} <- :code.all_loaded(),

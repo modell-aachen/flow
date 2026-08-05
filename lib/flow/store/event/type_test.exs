@@ -105,6 +105,21 @@ defmodule Ariadne.Flow.Store.Event.TypeTest do
       assert PinnedByImplEvent == Type.module!("type-test-impl")
     end
 
+    test "is found for an event module compiled after the type was first resolved" do
+      Type.module!("type-test-pinned")
+
+      Code.compile_string("""
+      defmodule #{inspect(__MODULE__)}.LateEvent do
+        @derive {Ariadne.Flow.Store.Event.Encoder, type: "type-test-late"}
+        defstruct [:label]
+
+        def tags(_), do: []
+      end
+      """)
+
+      assert Module.concat(__MODULE__, LateEvent) == Type.module!("type-test-late")
+    end
+
     test "is missing for a type no event module declares" do
       assert_raise ArgumentError, ~r/No event module declares the stored event type/, fn ->
         Type.module!("type-test-nobody-declares-this")
