@@ -81,7 +81,7 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
   - `:metadata` — the metadata stored with the event, including the default `:created_at`.
   - `:type` and `:tags` — the stored form of the event, as `Ariadne.Flow.Store.Event.Encoder` wrote it.
 - `{:error, reason}` — the command returned `{:error, reason}`. Nothing is written and the reason is passed back unchanged.
-- `{:error, %Ariadne.Flow.AppendConditionError{}}` — a concurrent dispatch appended events matching this command's query between its read and its append. Nothing is written; see [concurrency](#concurrency).
+- `{:error, %Ariadne.Flow.AppendConditionError{}}` — a concurrent dispatch appended events matching this command's query between its read and its append, and deciding again did not get past it either. Nothing is written; see [concurrency](#concurrency).
 
 The line between values and raises is the commit: both error values mean nothing was written, so the caller may safely dispatch again. Everything on the other side of the commit is raised instead — a reactor failing after the events were appended, or a synchronous reactor not catching up in time; see [reactors](#reactors) and [synchronous reactors](#synchronous-reactors).
 
@@ -94,7 +94,7 @@ The third argument is a keyword list of options, all optional — the calls abov
 `dispatch!/3` behaves like `dispatch/3` but raises where `dispatch/3` returns an error value, so a caller that only cares about the success path cannot silently drop a failure. Each exception type carries its retry semantics:
 
 - `Ariadne.Flow.CommandError` — the command refused, wrapping the refusal `reason`. Nothing was written; dispatching again is pointless until the state it decided from changes.
-- `Ariadne.Flow.AppendConditionError` — the append condition failed. Nothing was written; retrying the dispatch is safe and decides from the new events.
+- `Ariadne.Flow.AppendConditionError` — the append condition failed on every attempt the dispatch made. Nothing was written; dispatching again is safe and decides from the new events, but a conflict the [retries](#retrying-a-conflict) could not get past is usually saying something about the command's consistency boundary.
 - `Ariadne.Flow.ReactorError` — raised by `dispatch/3` and `dispatch!/3` alike: the events were committed and a reactor failed afterwards. Never re-dispatch the command — that would append the events a second time. See [reactors](#reactors).
 - `Ariadne.Flow.ConsistencyTimeoutError` — raised by `dispatch/3` and `dispatch!/3` alike: the events were committed and a synchronous reactor did not catch up with them within the timeout. Nothing failed and the reactor's run is still scheduled; never re-dispatch. See [synchronous reactors](#synchronous-reactors).
 
@@ -271,9 +271,27 @@ For example, two processes try to subscribe the last free seat of a course at th
 1. Both read `course_capacity` and `course_subscriptions` for course 42 and see one seat left.
 2. Both decide `{:ok, [%StudentSubscribedToCourse{...}]}`.
 3. The first one appends its event and returns `{:ok, ...}`.
-4. The second one's append fails — a new event has appeared in its query range since the snapshot was taken. `dispatch/3` returns `{:error, %Ariadne.Flow.AppendConditionError{}}`.
+4. The second one's append is rejected — a new event has appeared in its query range since the snapshot was taken — so that dispatch decides again: it re-reads, now sees the other dispatch's event, and refuses the second subscription with `{:error, :course_full}`.
 
-The caller can retry a conflicted dispatch: nothing was written, and on retry the command re-reads and now sees the other dispatch's event — the second subscription is rejected with `{:error, :course_full}` instead. This retry advice covers only the two error *values* (the conflict and the command's own refusal), which both happen before anything is committed. A raise out of a dispatch means the events were committed — re-dispatching would append them again.
+### Retrying a conflict
+
+There is only one thing a caller can do with a rejected append: dispatch the same command again, now that the events it conflicted with are there to be read. `dispatch/3` does that itself. Each attempt is a fresh transaction with a fresh read, reduce and decision — a **re-decision, not a re-play** — so a conflicted command either succeeds against the state it now sees or returns its own refusal, and never appends what an earlier attempt decided on. Reactors are driven over the events of the attempt that committed, being the only events the dispatch appended.
+
+How many attempts a dispatch gets is bounded by the `:attempts` option, a positive integer defaulting to 3:
+
+```elixir
+iex> Ariadne.Flow.Application.dispatch(application, subscribe_student(42, 7), attempts: 1)
+```
+
+`attempts: 1` opts out of retrying entirely. Anything that is not a positive integer raises `ArgumentError`, before the command runs and with nothing written. The bound is an option on the dispatch rather than on the application because how much contention is worth riding out is a property of the command doing the deciding.
+
+The bound is small, and there is no delay between attempts, because appends on a store serialise on the append lock: a dispatch that lost a race usually wins the next attempt. What more attempts cannot fix is the reason for the contention. Every attempt reads before it appends, so N dispatches contending over the same events do O(N²) reads between them — the retries are there to absorb the occasional loser, not to make a hot consistency boundary work. Once they run out, `dispatch/3` returns `{:error, %Ariadne.Flow.AppendConditionError{}}`.
+
+Retrying must not hide the contention it absorbs, so every dispatch is reported as a `[:ariadne, :flow, :dispatch]` telemetry span carrying the number of attempts it took as a measurement, and its outcome as metadata: `:ok`, `:conflict` for a dispatch that exhausted its attempts, `:error` for a command that refused. Attempt counts climbing above one are what a consistency boundary drawn too broadly looks like from the outside, and they say so before the conflicts start surviving the retries.
+
+A dispatch [nested](#nesting) in a transaction the caller opened is not retried — it gets a single attempt, whatever `:attempts` says. Its re-read would happen inside the caller's transaction: under repeatable read or serializable it sees the same snapshot and fails exactly as deterministically, and under read committed the outer transaction would end up containing work decided on state that changed mid-flight. As with a synchronous reactor, nesting changes the rules, and retrying is left to whoever owns the outer transaction.
+
+Retrying is safe because nothing was committed, which is also the limit of it. That covers the two error *values* — the conflict and the command's own refusal — and nothing else. A raise out of a dispatch means the events *were* committed, and re-dispatching would append them a second time. Now that the framework retries the error values itself, that line is all a caller has left to observe: there is no conflict to catch and retry any more, only raises that must not be retried.
 
 Waiting for a [synchronous reactor](#synchronous-reactors) does not join that contention. The wait starts after the commit, with the dispatch's transaction closed and the append lock released, so a dispatch waiting on a reactor holds nothing that another dispatch on the same store needs. Where the engine keeps that true is in what it does with a run: handing it to a job system inside the dispatch's transaction is a row insert, while executing the reactor there does its work under the append lock, stalling every concurrent dispatch on that store for the duration.
 

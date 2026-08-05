@@ -1,6 +1,7 @@
 defmodule Ariadne.Flow.Application do
   @moduledoc false
   alias Ariadne.Flow.AppendConditionError
+  alias Ariadne.Flow.Attempts
   alias Ariadne.Flow.CommandError
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Consistency
@@ -42,10 +43,19 @@ defmodule Ariadne.Flow.Application do
         await_timeout: Keyword.get(opts, :await_timeout)
       })
 
-    store
-    |> append_and_hand_off(command_handler, handoff)
-    |> raise_reactor_failure()
-    |> await(consistency, store)
+    attempts = Attempts.new(%{attempts: Keyword.get(opts, :attempts), nested: nested})
+
+    :telemetry.span([:ariadne, :flow, :dispatch], %{}, fn ->
+      {appended, attempted} =
+        Attempts.run(attempts, fn -> append_and_hand_off(store, command_handler, handoff) end)
+
+      result =
+        appended
+        |> raise_reactor_failure()
+        |> await(consistency, store)
+
+      {result, %{attempts: attempted}, %{result: outcome(result)}}
+    end)
   end
 
   def dispatch!(%__MODULE__{} = application, command, opts \\ []) do
@@ -79,6 +89,10 @@ defmodule Ariadne.Flow.Application do
       end
     end)
   end
+
+  defp outcome({:ok, _result}), do: :ok
+  defp outcome({:error, %AppendConditionError{}}), do: :conflict
+  defp outcome({:error, _reason}), do: :error
 
   defp raise_reactor_failure({:error, %ReactorError{} = error}), do: raise(error)
   defp raise_reactor_failure(result), do: result
