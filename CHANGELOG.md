@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/modell-aachen/flow/compare/v0.4.0...v0.5.0) (2026-08-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* `Reactor.start_after_position` defaults to `:head` instead of `0` and accepts either, so `%Reactor{start_after_position: 0}` no longer matches a default-constructed reactor and `Reactor.new/2` raises on any other value. A checkpoint-less reactor carrying an integer declaration now has it honoured on its first run, where a dispatch previously overrode it: such a reactor works through the whole matching history on that run, inside the dispatch's transaction under the default inline engine. Run `Application.catch_up/2` at deploy or boot to keep that off a request. A reactor that already has a checkpoint is unaffected. `ReactorRun.new/1` raises on a `:head` declaration rather than defaulting to a position, so a caller building a run by hand must resolve it; the documented engine contract (`execute/2`, `sync?/1`, `inline?/1`, `dump/1`, `load/1`) is untouched.
+
+### Features
+
+* drive reactors out of band with catch_up ([#20](https://github.com/modell-aachen/flow/issues/20)) ([c738a83](https://github.com/modell-aachen/flow/commit/c738a83fd69632097e9c9bee956ebd535e1e44a6))
+
 ## [0.4.0](https://github.com/modell-aachen/flow/compare/v0.3.0...v0.4.0) (2026-08-04)
 
 
