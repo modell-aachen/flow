@@ -19,7 +19,7 @@ Each event consists of the following essential parts:
 - The **event type**. It is the name the event is stored under, declared with `type:` on the
   derive. Here the event type is `"course-defined"`. Left out, it defaults to the module name —
   `"CourseDefined"` — which ties the stored history to what the module is called; see
-  [Evolving events](#evolving-events) for why declaring it is worth the one line.
+  [Renaming an event module](#renaming-an-event-module) for why declaring it is worth the one line.
 - The `Ariadne.Flow.Store.Event.Encoder` protocol implementation. Each event needs to implement
   this protocol, which allows us to append and read the event in the `Ariadne.Flow.Store`.
   With `@derive Ariadne.Flow.Store.Event.Encoder` the event gets the default encoder implementation.
@@ -42,12 +42,23 @@ When the model genuinely needs to change, introduce a new event type rather than
 
 An event that declares its type can be renamed and moved between namespaces freely — the store never knew the module name to begin with. That is why declaring `type:` from day one is worth the line: it is the only starting point a rename cannot break, and it lets the type read as the store's own name for the fact (`"course-defined"`) rather than as an Elixir module path.
 
-An event that does not declare one is stored under its module name, so renaming the module is renaming the type. The remedy is to declare the old string on the module that replaced it:
+An event that does not declare one is stored under its module name, so renaming the module is renaming the type. Suppose this event has been writing history as `"LessonScheduled"`:
 
 ```elixir
-defmodule Courses.CourseDefined do
-  @derive {Ariadne.Flow.Store.Event.Encoder, type: "CourseDefined"}
-  defstruct [:course_id, :capacity]
+defmodule LessonScheduled do
+  @derive Ariadne.Flow.Store.Event.Encoder
+  defstruct [:course_id, :lesson_id]
+
+  def tags(e), do: ["course:#{e.course_id}"]
+end
+```
+
+The remedy is to declare that string on the module that replaced it:
+
+```elixir
+defmodule Scheduling.LessonScheduled do
+  @derive {Ariadne.Flow.Store.Event.Encoder, type: "LessonScheduled"}
+  defstruct [:course_id, :lesson_id]
 
   def tags(e), do: ["course:#{e.course_id}"]
 end
