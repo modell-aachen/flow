@@ -1,16 +1,7 @@
 defmodule Ariadne.Flow.Store.Event.Codec do
   alias Ariadne.Flow.Store.Event.Encoder
+  alias Ariadne.Flow.Store.Event.Type
   alias Ariadne.Flow.Store.SequencedEvent
-
-  def serialize_type(type) when is_atom(type) do
-    type
-    |> Atom.to_string()
-    |> String.trim_leading("Elixir.")
-  end
-
-  def deserialize_type(type) when is_binary(type) do
-    String.to_existing_atom("Elixir." <> type)
-  end
 
   def deserialize(%SequencedEvent{
         event: event,
@@ -20,7 +11,7 @@ defmodule Ariadne.Flow.Store.Event.Codec do
       }) do
     reconstructed_event =
       event.type
-      |> deserialize_type()
+      |> Type.module!()
       |> struct()
       |> Encoder.decode(event.data, metadata)
 

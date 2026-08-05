@@ -10,21 +10,21 @@ The examples on this page reference three events:
 
 ```elixir
 defmodule CourseDefined do
-  @derive Ariadne.Flow.Store.Event.Encoder
+  @derive {Ariadne.Flow.Store.Event.Encoder, type: "course-defined"}
   defstruct [:course_id, :capacity]
 
   def tags(e), do: ["course:#{e.course_id}"]
 end
 
 defmodule CourseCapacityChanged do
-  @derive Ariadne.Flow.Store.Event.Encoder
+  @derive {Ariadne.Flow.Store.Event.Encoder, type: "course-capacity-changed"}
   defstruct [:course_id, :new_capacity]
 
   def tags(e), do: ["course:#{e.course_id}"]
 end
 
 defmodule StudentSubscribedToCourse do
-  @derive Ariadne.Flow.Store.Event.Encoder
+  @derive {Ariadne.Flow.Store.Event.Encoder, type: "student-subscribed-to-course"}
   defstruct [:student_id, :course_id]
 
   def tags(e), do: ["student:#{e.student_id}", "course:#{e.course_id}"]
@@ -52,7 +52,7 @@ A projection consists of the following essential parts:
 - The `initial_state` is the starting value used before any events are applied. Here it is `false`.
 - The `handler` is a function of `(state, event, metadata)` that returns the next state. Every event comes with additional metadata which can also be accessed. Event metadata is explained in the next sections.  Here every `CourseDefined` event replaces the state with `true`.
 
-`types` is required and must be a non-empty list. `tags` is optional — omit it to match every event of the listed types regardless of tags.
+`types` is required and must be a non-empty list. An event module in it stands for the [type that module declares](encoder.md#stored-type), so a filter follows a renamed module without being touched; a string is taken as the stored type itself. `tags` is optional — omit it to match every event of the listed types regardless of tags.
 
 The projection above is tied to course 42. To make it reusable for any course, wrap the construction in a function:
 

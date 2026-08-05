@@ -15,6 +15,13 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     def tags(%{count: count}), do: ["count:#{count}"]
   end
 
+  defmodule RenamedCountEvent do
+    @derive {Ariadne.Flow.Store.Event.Encoder, type: "count-event"}
+    defstruct count: 1
+
+    def tags(%{count: count}), do: ["count:#{count}"]
+  end
+
   defmodule FailingAppendStore do
     def new(reason), do: %Store{module: __MODULE__, config: reason}
     def read(_reason, _query, _opts), do: %{events: []}
@@ -84,6 +91,20 @@ defmodule Ariadne.Flow.CommandHandlerTest do
     )
   end
 
+  defp renamed_count_projection do
+    Projection.new(
+      %{initial_state: 0, filter: %{types: [RenamedCountEvent], only_last_event: true}},
+      fn _state, %RenamedCountEvent{count: count}, _ -> count end
+    )
+  end
+
+  defp renamed_count_command do
+    Composite.new(
+      %{count: renamed_count_projection()},
+      &{:ok, [%RenamedCountEvent{count: &1.count + 1}]}
+    )
+  end
+
   defp handle(command, store, attrs \\ %{}) do
     attrs
     |> Map.put(:command, command)
@@ -136,6 +157,21 @@ defmodule Ariadne.Flow.CommandHandlerTest do
                  }
                ]
              } = Store.read(store)
+    end
+
+    test "reads and appends the type an event declares, not the name of its module" do
+      store = Store.InMemory.init()
+
+      {:ok, _} =
+        Store.append(store, [
+          %Store.Event{type: "count-event", data: %{"count" => 7}, tags: ["count:7"]}
+        ])
+
+      assert {:ok, %{events: [%{event: %RenamedCountEvent{count: 8}}]}} =
+               handle(renamed_count_command(), store)
+
+      assert %{events: [_, %{event: %{type: "count-event", data: %{"count" => 8}}}]} =
+               Store.read(store)
     end
 
     test "stamps the given metadata on every appended event and folds it back into the decision" do

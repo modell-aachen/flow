@@ -6,6 +6,7 @@ defmodule Ariadne.Flow.CommandHandler do
   alias Ariadne.Flow.Store.AppendCondition
   alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.Event.Encoder
+  alias Ariadne.Flow.Store.Event.Type
 
   @enforce_keys [:command]
   defstruct [:command, metadata: %{}, created_at: nil]
@@ -51,7 +52,7 @@ defmodule Ariadne.Flow.CommandHandler do
     %{tags: tags, data: data} = Encoder.encode(event)
 
     %Store.Event{
-      type: Codec.serialize_type(type),
+      type: Type.of(type),
       data: data,
       tags: tags
     }

@@ -7,7 +7,7 @@ defmodule Ariadne.Flow.Examples.PageResponsible.Events do
   def module_tags(id), do: ["module:#{id}"]
 
   defmodule PageCreated do
-    @derive Store.Event.Encoder
+    @derive {Store.Event.Encoder, type: "page-created"}
     @enforce_keys [:id, :module_id, :responsible_id]
     defstruct @enforce_keys
 
@@ -15,7 +15,7 @@ defmodule Ariadne.Flow.Examples.PageResponsible.Events do
   end
 
   defmodule PageDeleted do
-    @derive Store.Event.Encoder
+    @derive {Store.Event.Encoder, type: "page-deleted"}
     @enforce_keys [:id]
     defstruct @enforce_keys
 
@@ -23,7 +23,7 @@ defmodule Ariadne.Flow.Examples.PageResponsible.Events do
   end
 
   defmodule ModuleAccessChanged do
-    @derive Store.Event.Encoder
+    @derive {Store.Event.Encoder, type: "module-access-changed"}
     @enforce_keys [:id, :roles]
     defstruct @enforce_keys
 
@@ -31,7 +31,7 @@ defmodule Ariadne.Flow.Examples.PageResponsible.Events do
   end
 
   defmodule PageResponsibleChanged do
-    @derive Store.Event.Encoder
+    @derive {Store.Event.Encoder, type: "page-responsible-changed"}
     @enforce_keys [:id, :responsible_id]
     defstruct @enforce_keys
 
