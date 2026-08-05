@@ -97,18 +97,18 @@ defmodule Ariadne.Flow.ReactorTest do
     assert Reactor.matches?(reactor, envelope(%ExampleEvent{id: "special"}))
   end
 
-  test "new/2 defaults start_after_position to 0" do
-    assert %Reactor{start_after_position: 0} = build_reactor(fn _, _ -> :ok end)
+  test "new/2 defaults start_after_position to :head, so history is opt-in" do
+    assert %Reactor{start_after_position: :head} = build_reactor(fn _, _ -> :ok end)
   end
 
-  test "new/2 keeps the provided start_after_position" do
-    reactor =
-      Reactor.new(
-        %{name: "example", filter: %{types: [ExampleEvent]}, start_after_position: 42},
-        fn _, _ -> :ok end
-      )
+  test "new/2 keeps a declared position, 0 asking for the store's whole history" do
+    assert %Reactor{start_after_position: 42} = start_after(42)
+    assert %Reactor{start_after_position: 0} = start_after(0)
+  end
 
-    assert %Reactor{start_after_position: 42} = reactor
+  test "new/2 rejects a start_after_position that is neither :head nor a position" do
+    assert_raise ArgumentError, ~r/:head or a non-negative position/, fn -> start_after(-1) end
+    assert_raise ArgumentError, ~r/:head or a non-negative position/, fn -> start_after(:tail) end
   end
 
   test "new/2 defaults sync to false" do
@@ -166,6 +166,13 @@ defmodule Ariadne.Flow.ReactorTest do
   defp new(params, handler) do
     args = [params, handler]
     apply(Reactor, :new, args)
+  end
+
+  defp start_after(position) do
+    Reactor.new(
+      %{name: "example", filter: %{types: [ExampleEvent]}, start_after_position: position},
+      fn _, _ -> :ok end
+    )
   end
 
   defp envelope(event), do: hd(given([event]))

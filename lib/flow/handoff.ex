@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.Handoff do
   @moduledoc false
+  alias Ariadne.Flow.Reactor
   alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
@@ -21,24 +22,53 @@ defmodule Ariadne.Flow.Handoff do
   def hand_off(%__MODULE__{reactors: []}, %Store{}, _events), do: :ok
 
   def hand_off(%__MODULE__{} = handoff, %Store{} = store, events) do
-    %{reactors: reactors, engine: {engine, opts}, metadata: metadata, nested: nested} = handoff
-    start_after_position = lowest_position(events) - 1
+    before_events = lowest_position(events) - 1
 
-    failures =
-      Enum.flat_map(reactors, fn reactor_module ->
-        reactor_run =
-          ReactorRun.new(%{
-            reactor: reactor_module,
-            start_after_position: start_after_position,
-            metadata: metadata,
-            nested: nested
-          })
+    handoff
+    |> runs(&dispatch_start(&1, before_events))
+    |> drive(handoff, store)
+  end
 
-        failures(engine.run(reactor_run, store, opts), reactor_run)
-      end)
+  def catch_up(%__MODULE__{reactors: []}, %Store{}), do: :ok
+
+  def catch_up(%__MODULE__{} = handoff, %Store{} = store) do
+    handoff
+    |> runs(&catch_up_start(&1, store))
+    |> drive(handoff, store)
+  end
+
+  defp runs(%__MODULE__{reactors: reactors, metadata: metadata, nested: nested}, start) do
+    Enum.flat_map(reactors, fn reactor_module ->
+      case start.(reactor_module.reactor()) do
+        :none ->
+          []
+
+        position ->
+          [
+            ReactorRun.new(%{
+              reactor: reactor_module,
+              start_after_position: position,
+              metadata: metadata,
+              nested: nested
+            })
+          ]
+      end
+    end)
+  end
+
+  defp drive(reactor_runs, %__MODULE__{engine: {engine, opts}}, store) do
+    failures = Enum.flat_map(reactor_runs, &failures(engine.run(&1, store, opts), &1))
 
     if failures == [], do: :ok, else: {:error, %ReactorError{failures: failures}}
   end
+
+  defp dispatch_start(%Reactor{start_after_position: :head}, before_events), do: before_events
+  defp dispatch_start(%Reactor{start_after_position: position}, _before_events), do: position
+
+  defp catch_up_start(%Reactor{start_after_position: :head, name: name}, store),
+    do: Store.checkpoint(store, name) || :none
+
+  defp catch_up_start(%Reactor{start_after_position: position}, _store), do: position
 
   defp failures(:ok, _reactor_run), do: []
   defp failures({:error, %ReactorError{failures: failures}}, _reactor_run), do: failures

@@ -51,6 +51,33 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
+  defmodule HistoryReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "history", filter: %{types: [CountEvent]}, start_after_position: 0},
+        fn event, metadata ->
+          send(Process.get(:inbox), {:got, "history", event, metadata})
+          :ok
+        end
+      )
+    end
+  end
+
+  defmodule BoomHistoryReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "boom-history", filter: %{types: [CountEvent]}, start_after_position: 0},
+        fn _event, _metadata -> {:error, :kaboom} end
+      )
+    end
+  end
+
   defmodule AlsoBoomReactor do
     alias Ariadne.Flow.ApplicationTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -571,6 +598,76 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_raise ConsistencyTimeoutError, ~r/never re-dispatch/, fn ->
         Application.dispatch!(application, count_command(1), await_timeout: 50)
       end
+    end
+  end
+
+  describe "catch_up/2" do
+    test "drives a reactor over events no dispatch of its own handed it" do
+      store = inbox_store()
+      writer = Application.new(%{store: store})
+      {:ok, _} = Application.dispatch(writer, count_command(1))
+      {:ok, _} = Application.dispatch(writer, count_command(1))
+
+      assert :ok =
+               Application.catch_up(Application.new(%{store: store, reactors: [HistoryReactor]}))
+
+      assert_received {:got, "history", %CountEvent{count: 1}, _}
+      assert_received {:got, "history", %CountEvent{count: 2}, _}
+    end
+
+    test "is a no-op for a reactor that is already up to date" do
+      application = Application.new(%{store: inbox_store(), reactors: [HistoryReactor]})
+      {:ok, _} = Application.dispatch(application, count_command(1))
+      assert_received {:got, "history", %CountEvent{count: 1}, _}
+
+      assert :ok = Application.catch_up(application)
+
+      refute_received {:got, "history", _, _}
+    end
+
+    test "skips a reactor that starts from now and has never run" do
+      store = inbox_store()
+      writer = Application.new(%{store: store})
+      {:ok, _} = Application.dispatch(writer, count_command(1))
+
+      assert :ok =
+               Application.catch_up(Application.new(%{store: store, reactors: [CountsReactor]}))
+
+      refute_received {:got, "counts", _, _}
+    end
+
+    test "returns a reactor failure as a value, because retrying a catch-up is always safe" do
+      store = inbox_store()
+      writer = Application.new(%{store: store})
+      {:ok, _} = Application.dispatch(writer, count_command(1))
+
+      application = Application.new(%{store: store, reactors: [BoomHistoryReactor]})
+
+      assert {:error, %ReactorError{failures: [%{name: "boom-history", reason: :kaboom}]}} =
+               Application.catch_up(application)
+    end
+
+    test "puts the given metadata on the run and marks it nested inside a transaction" do
+      store = inbox_store()
+      writer = Application.new(%{store: store})
+      {:ok, _} = Application.dispatch(writer, count_command(1))
+
+      application =
+        Application.new(%{
+          store: store,
+          reactors: [HistoryReactor],
+          engine: {RecordingEngine, result: :ok}
+        })
+
+      assert :ok = Application.catch_up(application, metadata: %{"trace_id" => "abc123"})
+
+      assert_received {:engine_run,
+                       %ReactorRun{metadata: %{"trace_id" => "abc123"}, nested: false}, _store,
+                       _opts}
+
+      Store.transaction(store, fn -> Application.catch_up(application) end)
+
+      assert_received {:engine_run, %ReactorRun{metadata: %{}, nested: true}, _store, _opts}
     end
   end
 
