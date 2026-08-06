@@ -13,14 +13,12 @@ defmodule Ariadne.Flow.Application do
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
-  require Logger
-
   defstruct [:store, reactors: [], engine: nil]
 
   def new(%{store: %Store{} = store} = attrs) do
     %__MODULE__{
       store: store,
-      reactors: Map.get(attrs, :reactors, []),
+      reactors: distinctly_named(Map.get(attrs, :reactors, [])),
       engine: ReactorEngine.normalize(Map.get(attrs, :engine))
     }
   end
@@ -52,7 +50,7 @@ defmodule Ariadne.Flow.Application do
       {committed, attempted} =
         Attempts.run(attempts, fn -> append_and_hand_off(store, command_handler, handoff) end)
 
-      result = react(committed, store, consistency)
+      result = react(committed, store, consistency, nested)
 
       {result, %{attempts: attempted}, %{result: outcome(result)}}
     end)
@@ -78,6 +76,20 @@ defmodule Ariadne.Flow.Application do
     EventReducer.evaluate(event_reducer, store).result
   end
 
+  defp distinctly_named(reactors) do
+    case reactors
+         |> Enum.frequencies_by(& &1.reactor().name)
+         |> Enum.filter(&(elem(&1, 1) > 1)) do
+      [] ->
+        reactors
+
+      repeated ->
+        raise ArgumentError,
+              "reactors must be distinctly named, a name being what a checkpoint is keyed " <>
+                "on — repeated: #{Enum.map_join(repeated, ", ", &inspect(elem(&1, 0)))}"
+    end
+  end
+
   defp append_and_hand_off(store, command_handler, handoff) do
     Store.transaction(store, fn ->
       with {:ok, %{events: events} = result} <- CommandHandler.handle(command_handler, store) do
@@ -86,37 +98,22 @@ defmodule Ariadne.Flow.Application do
     end)
   end
 
-  defp react({:ok, result, reactor_runs}, store, consistency) do
+  defp react({:ok, result, reactor_runs}, store, consistency, nested) do
     reactor_runs
     |> Handoff.execute(store)
-    |> surface()
+    |> surface(nested)
 
     await({:ok, result}, consistency, store)
   end
 
-  defp react(result, _store, _consistency), do: result
+  defp react(result, _store, _consistency, _nested), do: result
 
-  defp surface(failures) do
-    {awaited, isolated} = Enum.split_with(failures, &ReactorRun.sync?(&1.run))
-
-    Enum.each(isolated, &log/1)
-
-    if awaited != [], do: raise(PostCommitError.failure(Handoff.summarize(awaited)))
+  defp surface(failures, nested) do
+    case Enum.filter(failures, &ReactorRun.sync?(&1.run)) do
+      [] -> :ok
+      awaited -> raise PostCommitError.failure(Handoff.summarize(awaited), nested)
+    end
   end
-
-  defp log(%{name: name, position: position, reason: reason, stacktrace: stacktrace}) do
-    Logger.error(fn ->
-      "[ariadne.flow] reactor #{inspect(name)} failed#{at(position)}: " <>
-        "#{describe(reason, stacktrace)}\nThe dispatch's events are committed and the " <>
-        "reactor's checkpoint stayed put, so the next dispatch or catch_up runs it again."
-    end)
-  end
-
-  defp at(nil), do: ""
-  defp at(position), do: " at position #{position}"
-
-  defp describe(reason, nil), do: inspect(reason)
-  defp describe(exception, stacktrace), do: Exception.format(:error, exception, stacktrace)
 
   defp reactor_error([]), do: :ok
   defp reactor_error(failures), do: {:error, %ReactorError{failures: Handoff.summarize(failures)}}

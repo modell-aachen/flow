@@ -6,6 +6,8 @@ defmodule Ariadne.Flow.Handoff do
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
 
+  require Logger
+
   @enforce_keys [:reactors]
   defstruct [:reactors, engine: nil, metadata: %{}, nested: false]
 
@@ -61,41 +63,62 @@ defmodule Ariadne.Flow.Handoff do
         []
 
       {:error, %ReactorError{failures: failures}} ->
-        Enum.map(failures, &Map.merge(&1, %{run: reactor_run, stacktrace: nil}))
+        Enum.map(failures, &Map.merge(&1, %{run: reactor_run, kind: nil, stacktrace: nil}))
     end
-  rescue
-    exception -> [raised(reactor_run, exception, __STACKTRACE__)]
+  catch
+    kind, value -> [caught(reactor_run, kind, value, __STACKTRACE__)]
   end
 
-  defp raised(reactor_run, exception, stacktrace) do
+  defp caught(reactor_run, kind, value, stacktrace) do
     %{
       run: reactor_run,
       name: ReactorRun.name(reactor_run),
       position: nil,
-      reason: exception,
+      reason: Exception.normalize(kind, value, stacktrace),
+      kind: kind,
       stacktrace: stacktrace
     }
   end
 
   defp report(failures) do
-    Enum.each(failures, fn %{name: name, position: position, reason: reason} ->
+    Enum.each(failures, fn failure ->
       :telemetry.execute(
         [:ariadne, :flow, :reactor, :failure],
         %{system_time: System.system_time()},
-        %{name: name, position: position, reason: reason}
+        Map.take(failure, [:name, :position, :reason])
       )
+
+      log(failure)
     end)
 
     failures
   end
 
+  defp log(%{name: name, position: position} = failure) do
+    Logger.error(fn ->
+      "[ariadne.flow] reactor #{inspect(name)} failed#{at(position)}: #{describe(failure)}\n" <>
+        "Its checkpoint stayed put, so the next dispatch or catch_up runs it again."
+    end)
+  end
+
+  defp at(nil), do: ""
+  defp at(position), do: " at position #{position}"
+
+  defp describe(%{kind: nil, reason: reason}), do: inspect(reason)
+
+  defp describe(%{kind: kind, reason: reason, stacktrace: stacktrace}),
+    do: Exception.format(kind, reason, stacktrace)
+
   defp unscheduled([], %__MODULE__{}, %Store{}), do: []
   defp unscheduled(reactor_runs, %__MODULE__{engine: nil}, %Store{}), do: reactor_runs
 
   defp unscheduled(reactor_runs, %__MODULE__{engine: {engine, opts}}, %Store{} = store) do
-    scheduled = engine.schedule(reactor_runs, store, opts)
+    scheduled =
+      reactor_runs
+      |> engine.schedule(store, opts)
+      |> MapSet.new(&ReactorRun.name/1)
 
-    Enum.reject(reactor_runs, &(&1 in scheduled))
+    Enum.reject(reactor_runs, &MapSet.member?(scheduled, ReactorRun.name(&1)))
   end
 
   defp runs(%__MODULE__{reactors: reactors, metadata: metadata}), do: runs(reactors, metadata)

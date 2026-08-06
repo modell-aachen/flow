@@ -73,4 +73,20 @@ defmodule Ariadne.Flow.PostCommitErrorTest do
       assert message =~ "never re-dispatch"
     end
   end
+
+  # A nested dispatch's events belong to the caller's open transaction, so this raise
+  # undoes them rather than following them — saying "never re-dispatch" would lose the write.
+  describe "a failure raised out of a nested dispatch" do
+    test "says the events go with the caller's transaction, not that they are committed" do
+      message =
+        [%{name: "sync", position: 1, reason: :kaboom}]
+        |> PostCommitError.failure(true)
+        |> Exception.message()
+
+      assert message =~ "the transaction you opened"
+      assert message =~ "may be dispatched again"
+      refute message =~ "the events are committed"
+      refute message =~ "never re-dispatch"
+    end
+  end
 end

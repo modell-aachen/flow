@@ -10,6 +10,8 @@ defmodule Ariadne.Flow.HandoffTest do
   alias Ariadne.Flow.Test.Repo
   alias Ecto.Adapters.SQL.Sandbox
 
+  @moduletag capture_log: true
+
   defmodule CountEvent do
     @derive Ariadne.Flow.Store.Event.Encoder
     defstruct count: 1
@@ -96,6 +98,29 @@ defmodule Ariadne.Flow.HandoffTest do
     end
   end
 
+  # What a handler that talks to a dead process does — an exit rather than an exception.
+  defmodule ExitingReactor do
+    alias Ariadne.Flow.HandoffTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(%{name: "exiting", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
+        exit(:noproc)
+      end)
+    end
+  end
+
+  defmodule ThrowingReactor do
+    alias Ariadne.Flow.HandoffTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(%{name: "throwing", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
+        throw(:nope)
+      end)
+    end
+  end
+
   # A scheduler that reports every run it is handed as durably enqueued without doing
   # anything about it — what Flow does with a run it believes is somebody else's.
   defmodule SchedulingEngine do
@@ -117,6 +142,24 @@ defmodule Ariadne.Flow.HandoffTest do
       send(self(), {:offered, reactor_runs})
 
       []
+    end
+  end
+
+  # What an engine that dumps its job args and hands back what it would enqueue looks like:
+  # the round trip stringifies metadata keys, so the runs come back as equal-but-not-identical
+  # terms.
+  defmodule RoundTrippingEngine do
+    @behaviour ReactorEngine
+
+    @impl ReactorEngine
+    def schedule(reactor_runs, _store, _opts) do
+      Enum.map(reactor_runs, fn reactor_run ->
+        reactor_run
+        |> ReactorRun.dump()
+        |> Jason.encode!()
+        |> Jason.decode!()
+        |> ReactorRun.load()
+      end)
     end
   end
 
@@ -360,11 +403,40 @@ defmodule Ariadne.Flow.HandoffTest do
       store = postgres_store()
       events = append(store)
 
-      assert [%{name: "raising", position: nil, reason: reason, stacktrace: stacktrace}] =
+      assert [%{name: "raising", position: nil, kind: :error, reason: reason} = failure] =
                drive([RaisingReactor], store, events)
 
       assert %RuntimeError{message: "kaboom"} = reason
+      assert is_list(failure.stacktrace)
+    end
+
+    # A handler talking to a dead process exits rather than raises, and an exit escaping
+    # here would take an already-committed dispatch down with it.
+    test "contains an exiting reactor, the way it contains a raising one" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "exiting", kind: :exit, reason: :noproc, stacktrace: stacktrace}] =
+               drive([ExitingReactor], store, events)
+
       assert is_list(stacktrace)
+    end
+
+    test "contains a throwing reactor" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "throwing", kind: :throw, reason: :nope}] =
+               drive([ThrowingReactor], store, events)
+    end
+
+    test "runs the reactors after one that exited" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "exiting"}] = drive([ExitingReactor, AlphaReactor], store, events)
+
+      assert_received {:got, "alpha", _, _}
     end
 
     test "runs every reactor declared after a failing one, in declaration order" do
@@ -445,6 +517,18 @@ defmodule Ariadne.Flow.HandoffTest do
                hand_off([CountsReactor], store, events, %{engine: NothingScheduledEngine})
 
       assert_received {:offered, [%ReactorRun{reactor: CountsReactor}]}
+    end
+
+    # Reported as scheduled is reported as scheduled, however the engine got the value
+    # back — a job engine that returns what it dumped and reloaded means the same thing.
+    test "recognizes a claimed run the engine rebuilt rather than handed back" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [] =
+               drive([CountsReactor], store, events, %{engine: RoundTrippingEngine})
+
+      refute_received {:got, "counts", _, _}
     end
 
     test "keeps the runs a partial scheduler left behind" do

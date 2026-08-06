@@ -95,7 +95,7 @@ The third argument is a keyword list of options, all optional — the calls abov
 
 - `Ariadne.Flow.CommandError` — the command refused, wrapping the refusal `reason`. Nothing was written; dispatching again is pointless until the state it decided from changes.
 - `Ariadne.Flow.AppendConditionError` — the append condition failed on every attempt the dispatch made. Nothing was written; dispatching again is safe and decides from the new events, but a conflict the [retries](#retrying-a-conflict) could not get past is usually saying something about the command's consistency boundary.
-- `Ariadne.Flow.PostCommitError` — raised by `dispatch/3` and `dispatch!/3` alike: the events were committed and a synchronous reactor did not deliver what the caller declared it wanted. Its `reason` says which way — `:failure` for a reactor that failed, `:timeout` for one that did not catch up in time. **Never re-dispatch the command**, whichever it is: the events are already in the store and dispatching again would append them a second time. See [synchronous reactors](#synchronous-reactors).
+- `Ariadne.Flow.PostCommitError` — raised by `dispatch/3` and `dispatch!/3` alike: the events were committed and a synchronous reactor did not deliver what the caller declared it wanted. Its `reason` says which way — `:failure` for a reactor that failed, `:timeout` for one that did not catch up in time. **Never re-dispatch the command**, whichever it is: the events are already in the store and dispatching again would append them a second time. The one exception is a [nested](#nesting) dispatch, whose events are the caller's to roll back; the error carries `nested: true` and its message says so. See [synchronous reactors](#synchronous-reactors).
 
 ## Metadata
 
@@ -169,7 +169,9 @@ Every successful `dispatch/3` then drives the reactors nobody else will over the
 
 ### When a reactor fails
 
-An **asynchronous reactor's failure never surfaces in the dispatch**, however it is expressed. Returning `{:error, reason}` and raising are both caught, reported as a `[:ariadne, :flow, :reactor, :failure]` telemetry event and logged, and the dispatch returns `{:ok, ...}` as if nothing had happened. There is nothing useful the dispatcher could do with the failure: the events are committed, and turning that into an error value would only invite a retry wrapper to append them again.
+An **asynchronous reactor's failure never surfaces in the dispatch**, however it is expressed. Returning `{:error, reason}`, raising, exiting — a `GenServer.call` to a dead process is the everyday one — and throwing are all contained; the dispatch returns `{:ok, ...}` as if nothing had happened. There is nothing useful the dispatcher could do with the failure: the events are committed, and turning that into an error value would only invite a retry wrapper to append them again.
+
+Every failure, synchronous or not, is reported as a `[:ariadne, :flow, :reactor, :failure]` telemetry event and logged with its origin — the stacktrace included, when there was one. That log line is the only place a raise inside a reactor keeps its trace, since the exception a synchronous failure raises at the caller carries the *dispatch's* stack, not the reactor's.
 
 Recovery does not need the dispatcher either. The failed reactor's checkpoint is parked right in front of the event it choked on, so the next dispatch or catch-up runs it again from there once the cause is fixed. That is also the shape of the guarantee reactors come with: **side effects are at-least-once**, even without a job system behind them. A reactor that fails half-way through a batch will see the events it already processed again, so a handler whose effect must not happen twice has to make itself idempotent.
 
@@ -216,7 +218,7 @@ A dispatch made inside a transaction the *caller* opened cannot wait for a sched
 
 `dispatch/3` therefore asks the store whether a transaction is already open before opening its own, and splits the runs accordingly:
 
-- **Synchronous runs are never offered to the engine.** Flow executes them itself, in the caller's transaction, where the uncommitted events are visible. The confirmation comes with the execution rather than being waited for, so the dispatch waits for nothing. What it gives up is the job system for them, and the isolation that comes with a committed transaction: a synchronous reactor that fails here raises inside the caller's transaction, and what that does to the caller's work is the caller's to decide.
+- **Synchronous runs are never offered to the engine.** Flow executes them itself, in the caller's transaction, where the uncommitted events are visible. The confirmation comes with the execution rather than being waited for, so the dispatch waits for nothing. What it gives up is the job system for them, and the isolation that comes with a committed transaction: a synchronous reactor that fails here raises inside the caller's transaction, and what that does to the caller's work is the caller's to decide. The `Ariadne.Flow.PostCommitError` says so — it carries `nested: true` and drops the usual "never re-dispatch", because letting the raise propagate rolls the events back with everything else the caller was doing, and the command can then be dispatched again.
 - **Asynchronous runs are offered to the engine as usual and never executed.** A job row inserted in the outer transaction runs after that transaction commits, which is exactly when the next dispatch or `catch_up/2` would have picked the same events up. Whether an engine is configured or not, the work lands in the same place — so nesting behaves the same under every engine.
 
 ## The engine
@@ -240,6 +242,8 @@ It has one callback:
 `schedule/3` is called **once per dispatch, inside the dispatch's transaction, with the whole run set** — one `Ariadne.Flow.ReactorRun` per reactor, in declaration order. A run is the storeless value that crosses the boundary to a job system: the reactor module and the dispatch metadata, and nothing else. Where the reactor resumes is not part of it, because the checkpoint in the store already says.
 
 The engine returns the runs it scheduled, and that return carries its single obligation: **a run may be reported as scheduled only if it will execute even when this process dies, given the transaction commits.** A row inserted into a job table is that. A message to another process is not. `Ariadne.Flow` executes every run the engine did not claim, so a scheduler that claims fewer runs than it was given — or none, or no engine at all — costs promptness and nothing else.
+
+A claimed run is recognised by its reactor, so returning runs you rebuilt (`load/1` on the args you just dumped, say) claims them just as returning the runs you were handed does.
 
 An Oban engine is the whole of it: `insert_all` the job rows in the transaction `schedule/3` was called in, return the runs. Nothing about failure isolation, nothing about running anything inline — those obligations do not exist any more, because the engine never holds them. Since `schedule/3` runs inside the dispatch's transaction while the append still holds its lock, anything slower than that insert belongs in the job, not here.
 
@@ -277,6 +281,8 @@ Each configured reactor is built into a run and offered to the [engine](#the-eng
 - **Nothing is awaited.** No events were appended and no caller is waiting to read a write back, so `sync: true` says nothing here. A synchronous reactor is treated like any other and `catch_up/2` returns without waiting on a checkpoint.
 - **Each batch commits on its own.** Outside a dispatch's transaction, every batch `consume` processes commits by itself. A catch-up that crashes half-way through a large history keeps the progress it made and resumes from there.
 - **A reactor that declared a position and has never run is started at it**, exactly as a dispatch would have. A **`:head` reactor with no checkpoint is skipped**: *from now* is defined by the dispatch that first runs it, and a catch-up has no events to define it against. Such a reactor is left out of the pass entirely rather than being started at the current head.
+
+Nesting says nothing here either. A catch-up has no events of its own to keep invisible, so one made inside a transaction the caller opened runs its reactors like any other — its consumed batches and its checkpoint writes simply join that transaction and are undone with it, the way every other store write inside it is.
 
 Running a catch-up while dispatches are happening needs no coordination from the caller. A reactor's events are consumed under a lock held per reactor, taken before its checkpoint is read and released when the new one is committed, so a post-dispatch run and a scheduled catch-up for the same reactor serialise against each other: whichever arrives second reads the first's committed checkpoint and continues from there, or finds nothing left and no-ops. Neither can move the checkpoint backwards, because a checkpoint is only ever created where it does not exist. Two catch-ups running at once are the same story.
 
