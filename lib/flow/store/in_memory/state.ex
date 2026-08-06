@@ -28,6 +28,12 @@ defmodule Ariadne.Flow.Store.InMemory.State do
 
   def checkpoint(%__MODULE__{checkpoints: checkpoints}, name), do: Map.get(checkpoints, name)
 
+  def init_checkpoints(%__MODULE__{} = state, checkpoints) do
+    Enum.reduce(checkpoints, state, fn %{name: name, position: position}, %__MODULE__{} = acc ->
+      %__MODULE__{acc | checkpoints: Map.put_new(acc.checkpoints, name, position)}
+    end)
+  end
+
   def append(%__MODULE__{} = state, events, opts) when is_list(events) and is_list(opts) do
     append_condition = Keyword.get(opts, :condition)
 
@@ -43,16 +49,11 @@ defmodule Ariadne.Flow.Store.InMemory.State do
 
   def consume(
         %__MODULE__{} = state,
-        %StoredEventReactor{
-          name: name,
-          query: query,
-          handler: handler,
-          start_after_position: start_after_position
-        },
+        %StoredEventReactor{name: name, query: query, handler: handler},
         batch_size
       )
       when is_integer(batch_size) and batch_size > 0 do
-    prior_position = checkpoint(state, name) || start_after_position
+    prior_position = checkpoint(state, name) || 0
 
     %{events: events} = read(state, query, after: prior_position, limit: batch_size + 1)
 

@@ -4,7 +4,7 @@ defmodule Ariadne.Flow.Store.StoredEventReactor do
   alias Ariadne.Flow.Store.SequencedEvent
 
   @enforce_keys [:name, :query, :handler]
-  defstruct [:name, :query, :handler, start_after_position: 0]
+  defstruct @enforce_keys
 
   @query_hint_only_last_event "A reactor's query cannot ask for only_last_event — every event it leaves out is checkpointed past and never delivered"
 
@@ -16,21 +16,11 @@ defmodule Ariadne.Flow.Store.StoredEventReactor do
           ([SequencedEvent.t()] ->
              {:ok, non_neg_integer()} | {:error, non_neg_integer(), term()})
 
-  @type t :: %__MODULE__{
-          name: String.t(),
-          query: Query.t(),
-          handler: handler(),
-          start_after_position: non_neg_integer()
-        }
+  @type t :: %__MODULE__{name: String.t(), query: Query.t(), handler: handler()}
 
-  def new(%{name: name, query: query, handler: handler} = attrs)
+  def new(%{name: name, query: query, handler: handler})
       when is_binary(name) and is_list(query) and is_function(handler, 1) do
-    %__MODULE__{
-      name: name,
-      query: new_query(query),
-      handler: handler,
-      start_after_position: Map.get(attrs, :start_after_position, 0)
-    }
+    %__MODULE__{name: name, query: new_query(query), handler: handler}
   end
 
   defp new_query(query) do

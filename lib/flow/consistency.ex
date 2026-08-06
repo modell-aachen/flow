@@ -1,6 +1,6 @@
 defmodule Ariadne.Flow.Consistency do
   @moduledoc false
-  alias Ariadne.Flow.ConsistencyTimeoutError
+  alias Ariadne.Flow.PostCommitError
   alias Ariadne.Flow.Reactor
   alias Ariadne.Flow.Store
 
@@ -72,7 +72,7 @@ defmodule Ariadne.Flow.Consistency do
   end
 
   defp report({:timeout, pending, %{polls: polls}}, %{timeout: timeout} = metadata) do
-    error = ConsistencyTimeoutError.exception(unconfirmed: pending, timeout: timeout)
+    error = PostCommitError.timeout(pending, timeout)
 
     {{:error, error}, %{polls: polls},
      Map.merge(metadata, %{result: :timeout, unconfirmed: pending})}

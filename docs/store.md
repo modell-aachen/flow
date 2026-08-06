@@ -54,9 +54,9 @@ Everything the function wrote to the store — appended events, advanced reactor
 
 An error *return* is not a rollback. `{:error, reason}` comes back as it is, with the writes that led to it kept, the same as before there was a boundary at all: a command that refuses has written nothing anyway, and a reactor that returns an error leaves the events it failed on in the store, to be reacted to again later. Deciding that an error should undo the writes is the caller's business, and a caller who wants that can raise.
 
-The transaction also joins an ambient one — its own `transaction/2`, or, with the Postgres store, any transaction on the same repo — rather than committing independently inside it. `Ariadne.Flow.Store.in_transaction?/1` answers whether there is one to join, which is how a caller finds out whether a write it makes now would still be invisible to everybody else. `Application.dispatch/3` asks it to decide whether a synchronous reactor's run can be [deferred and waited for](application.html#nesting).
+The transaction also joins an ambient one — its own `transaction/2`, or, with the Postgres store, any transaction on the same repo — rather than committing independently inside it. `Ariadne.Flow.Store.in_transaction?/1` answers whether there is one to join, which is how a caller finds out whether a write it makes now would still be invisible to everybody else. `Application.dispatch/3` asks it to decide whether a synchronous reactor's run can be [scheduled and waited for](application.html#nesting).
 
-`Application.dispatch/3` wraps every dispatch in `transaction/2`, so a command's append and the pass over the reactors that react to it commit as one unit, and a crash part-way through cannot leave the events appended with only some of the reactors advanced.
+`Application.dispatch/3` wraps every dispatch in `transaction/2`, and what goes inside it is exactly what has to commit with the events: the append itself, the reactor checkpoints the append initialises, and whatever the [engine](application.html#the-engine) durably schedules. Reactors run *after* that transaction commits, so no reactor can undo a dispatch and none of them holds the append lock while it works.
 
 ## Backends
 
@@ -70,11 +70,14 @@ The transaction also joins an ambient one — its own `transaction/2`, or, with 
 | `count/1` | how many events the store holds, over the scope an `:all` read covers |
 | `consume/2` | hands a reactor its next batch of events and records how far it got |
 | `checkpoint/2` | the position a reactor has consumed up to, making its progress observable |
+| `init_checkpoints/2` | creates the checkpoints of the reactors that have none, leaving the rest alone |
 | `transaction/2` | runs a function, rolling its writes back if it raises |
 | `in_transaction?/1` | whether the calling process is already inside a transaction on this store |
 | `telemetry_metadata/1` | the metadata that identifies this storage on store telemetry |
 | `dump/1` and `load/1` | serialise the config, so a store can travel to a job system |
 
 Flow ships two backends. `Ariadne.Flow.Store.Postgres` is the one to run on. `Ariadne.Flow.Store.InMemory` keeps its events in an Agent, for tests and for anything else that wants a store without a database behind it; it dumps to the agent itself, so a store built from it round-trips within a node but cannot be handed to another one.
+
+`init_checkpoints/2` is where a reactor's [`start_after_position`](application.html#reactors) stops being a declaration and becomes a position in the store. A dispatch calls it with its events appended but not yet committed, so *from now* means the events of that dispatch and nothing later. Two things follow for a backend implementing it: it must never move a checkpoint that already exists, and creating the missing ones has to be atomic against concurrent appends — which the Postgres backend gets for free, since the append lock it took is held until the transaction commits. `consume/2` correspondingly knows nothing about declarations: it resumes from the checkpoint, or from the origin for a reactor nobody ever declared to this store.
 
 A third backend is a matter of satisfying the contract, not just defining the callbacks — total order over positions, a conditional append no concurrent writer can slip past, isolation between configs, checkpoints that survive. `Ariadne.Flow.Store.Backend` spells out what each callback owes its caller, `Ariadne.Flow.Store.InMemory` is short enough to read as the reference implementation, and the store test suite is parameterised over the shipped backends, so every case in it holds for any backend.

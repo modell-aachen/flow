@@ -48,6 +48,17 @@ defmodule Ariadne.Flow.Store do
     module.checkpoint(config, name)
   end
 
+  @doc """
+  Gives every reactor that has no checkpoint yet the one it declared, leaving the
+  reactors that already have one untouched.
+  """
+  def init_checkpoints(%__MODULE__{}, []), do: :ok
+
+  def init_checkpoints(%__MODULE__{module: module, config: config}, checkpoints)
+      when is_list(checkpoints) do
+    module.init_checkpoints(config, checkpoints)
+  end
+
   def transaction(%__MODULE__{module: module, config: config}, fun) when is_function(fun, 0) do
     module.transaction(config, fun)
   end
