@@ -60,12 +60,14 @@ defmodule Ariadne.Flow.Store.SlowOperationLoggerTest do
     assert log =~ "Slow flow store append: 150ms (threshold 100ms)"
   end
 
+  # Silence is asserted through the pid-targeted handler rather than capture_log/1, which
+  # captures the whole VM's output and so sees any async test logging alongside this one.
   test "stays silent when a read is under its threshold" do
-    assert emit(:read, 19) == ""
+    assert %{} == emit_attributes(:read, 19, %{})
   end
 
   test "stays silent when an append is under its threshold" do
-    assert emit(:append, 99) == ""
+    assert %{} == emit_attributes(:append, 99, %{})
   end
 
   test "logs at the threshold boundary" do

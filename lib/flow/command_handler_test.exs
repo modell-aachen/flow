@@ -3,6 +3,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
   alias Ariadne.Flow.AppendConditionError
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Projection
   alias Ariadne.Flow.Store
 
@@ -139,6 +140,22 @@ defmodule Ariadne.Flow.CommandHandlerTest do
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 2}}]}} =
                handle(count_command(1), store)
+    end
+
+    test "returns each appended event as an Envelope carrying the form it was stored under" do
+      store = Store.InMemory.init()
+
+      assert {:ok,
+              %{
+                events: [
+                  %Envelope{
+                    event: %CountEvent{count: 1},
+                    type: "Ariadne.Flow.CommandHandlerTest.CountEvent",
+                    tags: ["count:1"],
+                    metadata: %{position: 1}
+                  }
+                ]
+              }} = handle(count_command(1), store)
     end
 
     test "serializes appended events into the store unchanged" do

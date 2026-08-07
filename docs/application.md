@@ -63,9 +63,11 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
 {:ok,
  %{
    events: [
-     %{
+     %Ariadne.Flow.Envelope{
        event: %StudentSubscribedToCourse{course_id: 42, student_id: 7},
-       metadata: %{created_at: ~U[2026-04-24 10:15:00Z]}
+       metadata: %{created_at: ~U[2026-04-24 10:15:00Z], position: 1},
+       type: "student-subscribed-to-course",
+       tags: ["student:7", "course:42"]
      }
    ]
  }}
@@ -76,10 +78,12 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
 
 `dispatch/3` returns one of three shapes:
 
-- `{:ok, %{events: entries}}` — the command emitted events and they were appended. `entries` is a list with one map per appended event, each carrying:
+- `{:ok, %{events: entries}}` — the command emitted events and they were appended. `entries` is a list with one `Ariadne.Flow.Envelope` per appended event, each carrying:
   - `:event` — the event struct the command emitted.
-  - `:metadata` — the metadata stored with the event, including the default `:created_at`.
+  - `:metadata` — the metadata stored with the event, including the defaults `:created_at` and `:position`.
   - `:type` and `:tags` — the stored form of the event, as `Ariadne.Flow.Store.Event.Encoder` wrote it.
+
+  Being a struct rather than a bare map, an entry does not implement `Access` — read a field with `entry.event`, not `entry[:event]` — and is not directly encodable by `Jason`.
 - `{:error, reason}` — the command returned `{:error, reason}`. Nothing is written and the reason is passed back unchanged.
 - `{:error, %Ariadne.Flow.AppendConditionError{}}` — a concurrent dispatch appended events matching this command's query between its read and its append, and deciding again did not get past it either. Nothing is written; see [concurrency](#concurrency).
 
@@ -119,7 +123,7 @@ handler: fn state, %SomeEvent{}, metadata ->
 end
 ```
 
-Every dispatch also adds default metadata on top of what you pass in. Currently this is only `:created_at`, a timestamp of when the events were appended. Default metadata keys are atoms, while user-provided metadata keys are serialised as strings when read back.
+Reading an event back also adds default metadata on top of what you passed in: `:created_at`, a timestamp of when the events were appended, and `:position`, the event's place in the store's total order. Default metadata keys are atoms, while user-provided metadata keys are serialised as strings when read back. A key you pass under one of those atoms does not survive the round trip — the stored values win.
 
 ## Reactors
 

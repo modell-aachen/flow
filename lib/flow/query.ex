@@ -27,8 +27,8 @@ defmodule Ariadne.Flow.Query do
       }
     end
 
-    def matches?(%{types: types, tags: tags}, %{type: _, tags: _} = event) do
-      matches_types?(types, event) and matches_tags?(tags, event)
+    def matches?(%{types: types, tags: tags}, %{type: _, tags: _} = stored) do
+      matches_types?(types, stored) and matches_tags?(tags, stored)
     end
 
     def take_last(events, %__MODULE__{only_last_event: true}), do: Enum.take(events, -1)
