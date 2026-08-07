@@ -2,7 +2,7 @@ defmodule Ariadne.Flow.Store.Speedrun.Repo.Migrations.AddModacFlowStore do
   use Ecto.Migration
   alias Ariadne.Flow.Store.Postgres.Migration
 
-  def change do
-    Migration.run(prefix())
-  end
+  def up, do: Migration.up()
+
+  def down, do: Migration.down()
 end
