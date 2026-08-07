@@ -4,11 +4,12 @@ defmodule Ariadne.Flow.Store.SlowOperationLogger do
 
   @handler_id "modac-flow-store-slow-operations"
 
-  @default_thresholds [read: 20, append: 100]
+  @default_thresholds [read: 20, append: 100, init_checkpoints: 100]
 
   @events [
     [:ariadne, :flow, :store, :read, :stop],
-    [:ariadne, :flow, :store, :append, :stop]
+    [:ariadne, :flow, :store, :append, :stop],
+    [:ariadne, :flow, :store, :init_checkpoints, :stop]
   ]
 
   def attach(thresholds \\ thresholds()) do
@@ -51,6 +52,7 @@ defmodule Ariadne.Flow.Store.SlowOperationLogger do
         "flow.context" => Map.get(metadata, :context),
         "flow.backend" => backend(metadata),
         "flow.event_count" => Map.get(measurements, :event_count),
+        "flow.checkpoint_count" => Map.get(measurements, :checkpoint_count),
         "flow.query" => Map.get(metadata, :query),
         "flow.condition" => Map.get(metadata, :condition)
       },

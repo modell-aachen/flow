@@ -24,7 +24,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
 
     def reactor(name, attrs \\ %{}) do
       Reactor.new(
-        Map.merge(%{name: name, filter: %{types: [CountEvent]}, start_after_position: 0}, attrs),
+        Map.merge(%{name: name, filter: %{types: [CountEvent]}}, attrs),
         fn event, metadata ->
           send(Process.get(:inbox), {:got, name, event, metadata})
           :ok
@@ -53,28 +53,15 @@ defmodule Ariadne.Flow.ReactorRunTest do
     def reactor, do: Recorder.reactor("sync", %{sync: true})
   end
 
-  defmodule SeededReactor do
-    alias Ariadne.Flow.ReactorRunTest.Recorder
-    def reactor, do: Recorder.reactor("seeded", %{start_after_position: 1})
-  end
-
-  defmodule HeadReactor do
-    alias Ariadne.Flow.ReactorRunTest.Recorder
-    def reactor, do: Recorder.reactor("head", %{start_after_position: :head})
-  end
-
   defmodule RejectsZeroReactor do
     alias Ariadne.Flow.Reactor
     alias Ariadne.Flow.ReactorRunTest.CountEvent
 
     def reactor do
-      Reactor.new(
-        %{name: "rejects-zero", filter: %{types: [CountEvent]}, start_after_position: 0},
-        fn
-          %CountEvent{count: 0}, _metadata -> {:error, :zero_not_allowed}
-          _event, _metadata -> :ok
-        end
-      )
+      Reactor.new(%{name: "rejects-zero", filter: %{types: [CountEvent]}}, fn
+        %CountEvent{count: 0}, _metadata -> {:error, :zero_not_allowed}
+        _event, _metadata -> :ok
+      end)
     end
   end
 
@@ -83,10 +70,9 @@ defmodule Ariadne.Flow.ReactorRunTest do
     alias Ariadne.Flow.ReactorRunTest.CountEvent
 
     def reactor do
-      Reactor.new(
-        %{name: "rejects-zero", filter: %{types: [CountEvent]}, start_after_position: 0},
-        fn _event, _metadata -> :ok end
-      )
+      Reactor.new(%{name: "rejects-zero", filter: %{types: [CountEvent]}}, fn
+        _event, _metadata -> :ok
+      end)
     end
   end
 
@@ -109,40 +95,14 @@ defmodule Ariadne.Flow.ReactorRunTest do
   end
 
   describe "new/1" do
-    test "builds a storeless run from a reactor module, seeding from the reactor's defaults" do
-      assert %ReactorRun{
-               reactor: CountsReactor,
-               start_after_position: 0,
-               metadata: %{}
-             } = ReactorRun.new(%{reactor: CountsReactor})
-    end
-
-    test "defaults start_after_position to the reactor's own declaration" do
-      assert %ReactorRun{start_after_position: 1} = ReactorRun.new(%{reactor: SeededReactor})
-    end
-
-    test "honors an explicit start_after_position" do
-      assert %ReactorRun{start_after_position: 5} =
-               ReactorRun.new(%{reactor: CountsReactor, start_after_position: 5})
-    end
-
-    test "refuses to carry :head, which only a run builder knowing what is now can resolve" do
-      assert_raise ArgumentError, ~r/:head is a declaration.*"head"/, fn ->
-        ReactorRun.new(%{reactor: HeadReactor})
-      end
-
-      assert %ReactorRun{start_after_position: 7} =
-               ReactorRun.new(%{reactor: HeadReactor, start_after_position: 7})
+    test "builds a storeless run from a reactor module alone" do
+      assert %ReactorRun{reactor: CountsReactor, metadata: %{}} =
+               ReactorRun.new(%{reactor: CountsReactor})
     end
 
     test "carries the dispatch metadata it is given" do
       assert %ReactorRun{metadata: %{"tenant_id" => "acme"}} =
                ReactorRun.new(%{reactor: CountsReactor, metadata: %{"tenant_id" => "acme"}})
-    end
-
-    test "is not nested unless the dispatch says it is" do
-      assert %ReactorRun{nested: false} = ReactorRun.new(%{reactor: CountsReactor})
-      assert %ReactorRun{nested: true} = ReactorRun.new(%{reactor: CountsReactor, nested: true})
     end
   end
 
@@ -151,40 +111,33 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert ReactorRun.sync?(run(SyncReactor))
       refute ReactorRun.sync?(run(CountsReactor))
     end
-
-    test "does not depend on the run being nested" do
-      assert ReactorRun.sync?(run(SyncReactor, %{nested: true}))
-    end
   end
 
-  describe "inline?/1" do
-    test "is true only for a sync run of a nested dispatch, the one that cannot be deferred" do
-      assert ReactorRun.inline?(run(SyncReactor, %{nested: true}))
-    end
-
-    test "is false for a sync run the engine may defer and await" do
-      refute ReactorRun.inline?(run(SyncReactor))
-    end
-
-    test "is false for an async run, nested or not" do
-      refute ReactorRun.inline?(run(CountsReactor))
-      refute ReactorRun.inline?(run(CountsReactor, %{nested: true}))
+  describe "name/1" do
+    test "reads the checkpoint name off the run's reactor" do
+      assert ReactorRun.name(run(CountsReactor)) == "counts"
     end
   end
 
   describe "dump/1 and load/1" do
     test "dumps a run to a store-free, string-keyed payload and loads it back" do
-      reactor_run =
-        run(CountsReactor, %{start_after_position: 3, metadata: %{"tenant_id" => "acme"}})
+      reactor_run = run(CountsReactor, %{metadata: %{"tenant_id" => "acme"}})
 
       assert %{
                "reactor" => "Elixir.Ariadne.Flow.ReactorRunTest.CountsReactor",
-               "start_after_position" => 3,
                "metadata" => %{"tenant_id" => "acme"}
              } = payload = ReactorRun.dump(reactor_run)
 
       refute Map.has_key?(payload, "store")
       assert ReactorRun.load(payload) == reactor_run
+    end
+
+    # Where a run resumes is the reactor's checkpoint, written before the run was ever
+    # handed anywhere — so a worker needs nothing from the dispatch but which reactor to run.
+    test "carries no resume position, the checkpoint being the only one there is" do
+      payload = ReactorRun.dump(run(SyncReactor))
+
+      assert Map.keys(payload) == ["metadata", "reactor"]
     end
 
     test "loads a payload carrying extra keys, so a worker can pass its whole job args" do
@@ -195,14 +148,6 @@ defmodule Ariadne.Flow.ReactorRunTest do
         |> Map.merge(%{"store" => %{"module" => "x"}, "sync" => false, "tenant_id" => "acme"})
 
       assert %ReactorRun{reactor: CountsReactor} = ReactorRun.load(payload)
-    end
-
-    test "drops the nesting flag, which belongs to the dispatch and not to the execution" do
-      payload = ReactorRun.dump(run(SyncReactor, %{nested: true}))
-
-      refute Map.has_key?(payload, "nested")
-      assert %ReactorRun{nested: false} = loaded = ReactorRun.load(payload)
-      refute ReactorRun.inline?(loaded)
     end
 
     test "loads a metadata-less payload with empty metadata" do
@@ -311,7 +256,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert :ok = ReactorRun.execute(run(AcceptsAllReactor), store)
     end
 
-    test "starts after start_after_position, skipping earlier events" do
+    test "resumes from the reactor's checkpoint, skipping the events before it" do
       store = inbox_store()
 
       Store.append(store, [
@@ -320,17 +265,22 @@ defmodule Ariadne.Flow.ReactorRunTest do
         count_store_event(3)
       ])
 
-      assert :ok = ReactorRun.execute(run(CountsReactor, %{start_after_position: 2}), store)
+      Store.init_checkpoints(store, [%{name: "counts", position: 2}])
+
+      assert :ok = ReactorRun.execute(run(CountsReactor), store)
 
       assert_received {:got, "counts", %CountEvent{count: 3}, _}
       refute_received {:got, "counts", _, _}
     end
 
-    test "start_after_position only seeds the first run; later runs resume from the checkpoint" do
+    # The run says which reactor to advance and nothing about where from, so a run kept
+    # around and executed twice cannot drag a checkpoint back to where it was built.
+    test "picks up where the last run left off, however old the run is" do
       store = inbox_store()
       Store.append(store, [count_store_event(1), count_store_event(2)])
+      Store.init_checkpoints(store, [%{name: "counts", position: 1}])
 
-      reactor_run = run(CountsReactor, %{start_after_position: 1})
+      reactor_run = run(CountsReactor)
 
       assert :ok = ReactorRun.execute(reactor_run, store)
       assert_received {:got, "counts", %CountEvent{count: 2}, _}

@@ -48,6 +48,26 @@ defmodule Ariadne.Flow.Store do
     module.checkpoint(config, name)
   end
 
+  @doc """
+  Gives every reactor that has no checkpoint yet the one it declared, leaving the
+  reactors that already have one untouched.
+  """
+  def init_checkpoints(%__MODULE__{}, []), do: :ok
+
+  def init_checkpoints(%__MODULE__{module: module, config: config}, checkpoints)
+      when is_list(checkpoints) do
+    base_metadata = telemetry_metadata(module, config)
+
+    :telemetry.span(
+      [:ariadne, :flow, :store, :init_checkpoints],
+      base_metadata,
+      fn ->
+        {module.init_checkpoints(config, checkpoints), %{checkpoint_count: length(checkpoints)},
+         base_metadata}
+      end
+    )
+  end
+
   def transaction(%__MODULE__{module: module, config: config}, fun) when is_function(fun, 0) do
     module.transaction(config, fun)
   end

@@ -1,8 +1,8 @@
 defmodule Ariadne.Flow.ConsistencyTest do
   use ExUnit.Case, async: true
   alias Ariadne.Flow.Consistency
-  alias Ariadne.Flow.ConsistencyTimeoutError
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.PostCommitError
   alias Ariadne.Flow.Reactor
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
@@ -110,9 +110,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
   end
 
   defp execute(store, reactor_module) do
-    reactor_run = ReactorRun.new(%{reactor: reactor_module, start_after_position: 0})
-
-    :ok = ReactorRun.execute(reactor_run, store)
+    :ok = ReactorRun.execute(ReactorRun.new(%{reactor: reactor_module}), store)
   end
 
   describe "new/1" do
@@ -200,7 +198,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
     test "times out with the reactors it never confirmed and the position it awaited" do
       {store, events} = store_with_counts(2)
 
-      assert {:error, %ConsistencyTimeoutError{} = error} =
+      assert {:error, %PostCommitError{} = error} =
                Consistency.await(
                  Consistency.new(%{
                    reactors: [SyncReactor, OtherSyncReactor],
@@ -222,7 +220,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
       {store, events} = store_with_counts(1)
       execute(store, SyncReactor)
 
-      assert {:error, %ConsistencyTimeoutError{unconfirmed: [%{name: "other-sync"}]}} =
+      assert {:error, %PostCommitError{unconfirmed: [%{name: "other-sync"}]}} =
                Consistency.await(
                  Consistency.new(%{
                    reactors: [SyncReactor, OtherSyncReactor],
@@ -239,7 +237,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
 
       assert Store.checkpoint(store, "sync") == 1
 
-      assert {:error, %ConsistencyTimeoutError{unconfirmed: [%{name: "sync", position: 3}]}} =
+      assert {:error, %PostCommitError{unconfirmed: [%{name: "sync", position: 3}]}} =
                Consistency.await(
                  Consistency.new(%{reactors: [SyncReactor], await_timeout: @impatient}),
                  store,
@@ -279,7 +277,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
     test "awaits only the reactors the dispatch's events concern" do
       {store, events} = store_with_events([count_store_event(1)])
 
-      assert {:error, %ConsistencyTimeoutError{unconfirmed: [%{name: "sync", position: 1}]}} =
+      assert {:error, %PostCommitError{unconfirmed: [%{name: "sync", position: 1}]}} =
                Consistency.await(
                  Consistency.new(%{
                    reactors: [SyncReactor, TaggedSyncReactor],
@@ -294,7 +292,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
       {store, events} =
         store_with_events([tagged_store_event(), count_store_event(1), count_store_event(2)])
 
-      assert {:error, %ConsistencyTimeoutError{unconfirmed: unconfirmed}} =
+      assert {:error, %PostCommitError{unconfirmed: unconfirmed}} =
                Consistency.await(
                  Consistency.new(%{
                    reactors: [SyncReactor, TaggedSyncReactor],
@@ -346,7 +344,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
     test "backs off between polls instead of querying at a fixed short interval" do
       {store, events} = store_with_counts(1)
 
-      assert {:error, %ConsistencyTimeoutError{}} =
+      assert {:error, %PostCommitError{}} =
                Consistency.await(
                  Consistency.new(%{reactors: [SyncReactor], await_timeout: 200}),
                  store,
@@ -393,7 +391,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
       # confirmed at position 1 while "sync" is still awaited at position 2.
       execute(store, TaggedSyncReactor)
 
-      assert {:error, %ConsistencyTimeoutError{unconfirmed: [%{name: "sync"}]}} =
+      assert {:error, %PostCommitError{unconfirmed: [%{name: "sync"}]}} =
                Consistency.await(
                  Consistency.new(%{
                    reactors: [TaggedSyncReactor, SyncReactor],
@@ -408,30 +406,18 @@ defmodule Ariadne.Flow.ConsistencyTest do
     end
   end
 
-  describe "the timeout exception" do
-    test "says the events are committed and must not be dispatched again" do
-      message =
-        Exception.message(%ConsistencyTimeoutError{
-          unconfirmed: [%{name: "sync", position: 7}],
-          timeout: 5_000
-        })
+  describe "the timeout it gives up with" do
+    test "is the post-commit error, telling the caller the events are already in the store" do
+      {store, events} = store_with_counts(1)
 
-      assert message =~ ~s|the sync reactor "sync" (awaited at position 7)|
-      assert message =~ "did not catch up within 5000ms"
-      assert message =~ "committed"
-      assert message =~ "durably scheduled"
-      assert message =~ "never re-dispatch"
-    end
+      assert {:error, %PostCommitError{reason: :timeout} = error} =
+               Consistency.await(
+                 Consistency.new(%{reactors: [SyncReactor], await_timeout: @impatient}),
+                 store,
+                 events
+               )
 
-    test "names every unconfirmed reactor with the position it was awaited at" do
-      message =
-        Exception.message(%ConsistencyTimeoutError{
-          unconfirmed: [%{name: "sync", position: 7}, %{name: "tagged-sync", position: 3}],
-          timeout: 5_000
-        })
-
-      assert message =~
-               ~s|the sync reactors "sync" (awaited at position 7), "tagged-sync" (awaited at position 3)|
+      assert Exception.message(error) =~ "never re-dispatch"
     end
   end
 

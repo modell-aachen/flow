@@ -55,6 +55,11 @@ defmodule Ariadne.Flow.Store.InMemory do
   end
 
   @impl Backend
+  def init_checkpoints(agent, checkpoints) do
+    Agent.update(agent, &State.init_checkpoints(&1, checkpoints))
+  end
+
+  @impl Backend
   def transaction(agent, fun) when is_function(fun, 0) do
     if in_transaction?(agent), do: fun.(), else: rolling_back_on_raise(agent, fun)
   end

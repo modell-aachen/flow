@@ -164,14 +164,13 @@ defmodule Ariadne.Flow.Store.Postgres do
   def consume(%__MODULE__{repo: repo} = config, %StoredEventReactor{
         name: name,
         query: query,
-        handler: handler,
-        start_after_position: start_after_position
+        handler: handler
       }) do
     {:ok, result} =
       repo.transaction(fn ->
         lock_checkpoint!(repo, config.prefix, config.context, name)
 
-        prior_position = read_checkpoint_position(config, name, start_after_position)
+        prior_position = checkpoint(config, name) || 0
 
         %{events: events} = read(config, query, after: prior_position, limit: @batch_size + 1)
 
@@ -194,6 +193,24 @@ defmodule Ariadne.Flow.Store.Postgres do
       nil -> nil
       %EctoReactorCheckpoint{position: position} -> position
     end
+  end
+
+  @impl Backend
+  def init_checkpoints(%__MODULE__{repo: repo, prefix: prefix, context: context}, checkpoints) do
+    updated_at = DateTime.utc_now()
+
+    entries =
+      Enum.map(checkpoints, fn %{name: name, position: position} ->
+        %{context: context, name: name, position: position, updated_at: updated_at}
+      end)
+
+    repo.insert_all(EctoReactorCheckpoint, entries,
+      on_conflict: :nothing,
+      conflict_target: [:context, :name],
+      prefix: prefix
+    )
+
+    :ok
   end
 
   @impl Backend
@@ -257,9 +274,6 @@ defmodule Ariadne.Flow.Store.Postgres do
 
   defp position_after(_batch, 0, prior_position), do: prior_position
   defp position_after(batch, count, _prior) when count > 0, do: Enum.at(batch, count - 1).position
-
-  defp read_checkpoint_position(%__MODULE__{} = config, name, start_after_position),
-    do: checkpoint(config, name) || start_after_position
 
   defp write_checkpoint_position(
          %__MODULE__{repo: repo, prefix: prefix, context: context},

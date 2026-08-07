@@ -552,52 +552,37 @@ defmodule Ariadne.Flow.StoreTest do
                )
     end
 
-    test "starts after start_after_position when the reactor has no checkpoint yet",
-         %{store: store} do
+    test "starts after the reactor's initialized checkpoint", %{store: store} do
       append_position!(store, "ItemAdded")
       second = append_position!(store, "ItemAdded")
       third = append_position!(store, "ItemAdded")
+
+      Store.init_checkpoints(store, [%{name: "echo", position: second}])
 
       handler = recording_handler(self(), "echo")
 
       assert %ConsumeResult{status: :ok, processed: 1, more?: false} =
                Store.consume(
                  store,
-                 StoredEventReactor.new(%{
-                   name: "echo",
-                   query: @item_added,
-                   handler: handler,
-                   start_after_position: second
-                 })
+                 StoredEventReactor.new(%{name: "echo", query: @item_added, handler: handler})
                )
 
       assert_received {:got, "echo", %SequencedEvent{position: ^third}}
       refute_received {:got, "echo", %SequencedEvent{position: ^second}}
     end
 
-    test "ignores start_after_position once a checkpoint exists", %{store: store} do
-      append_position!(store, "ItemAdded")
+    test "starts at the origin for a reactor nobody ever initialized", %{store: store} do
+      first = append_position!(store, "ItemAdded")
 
       handler = recording_handler(self(), "echo")
 
-      assert %ConsumeResult{processed: 1, last_position: last} =
+      assert %ConsumeResult{processed: 1} =
                Store.consume(
                  store,
                  StoredEventReactor.new(%{name: "echo", query: @item_added, handler: handler})
                )
 
-      next = append_position!(store, "ItemAdded")
-
-      assert %ConsumeResult{processed: 1, last_position: ^next} =
-               Store.consume(
-                 store,
-                 StoredEventReactor.new(%{
-                   name: "echo",
-                   query: @item_added,
-                   handler: handler,
-                   start_after_position: last + 100
-                 })
-               )
+      assert_received {:got, "echo", %SequencedEvent{position: ^first}}
     end
 
     test "isolates positions across reactor names", %{store: store} do
@@ -761,6 +746,53 @@ defmodule Ariadne.Flow.StoreTest do
       consume!(store, "echo", @checkpoint_query)
 
       assert Store.checkpoint(store, "echo") == 0
+    end
+  end
+
+  describe "init_checkpoints/2" do
+    @checkpoint_query [%{types: ["ItemAdded"]}]
+
+    test "gives a reactor that has none the checkpoint it was declared at", %{store: store} do
+      assert :ok = Store.init_checkpoints(store, [%{name: "echo", position: 7}])
+
+      assert Store.checkpoint(store, "echo") == 7
+    end
+
+    test "initializes every reactor of the set in one call", %{store: store} do
+      assert :ok =
+               Store.init_checkpoints(store, [
+                 %{name: "echo", position: 7},
+                 %{name: "other", position: 0}
+               ])
+
+      assert Store.checkpoint(store, "echo") == 7
+      assert Store.checkpoint(store, "other") == 0
+    end
+
+    test "accepts an empty set without touching the store", %{store: store} do
+      assert :ok = Store.init_checkpoints(store, [])
+    end
+
+    # The declaration only ever says where a reactor that never ran begins, so an init
+    # arriving after the reactor has moved on must not drag it back.
+    test "leaves a reactor that already has a checkpoint where it stands", %{store: store} do
+      position = append_position!(store, "ItemAdded")
+      consume!(store, "echo", @checkpoint_query)
+
+      assert :ok = Store.init_checkpoints(store, [%{name: "echo", position: 0}])
+
+      assert Store.checkpoint(store, "echo") == position
+    end
+
+    test "rolls back with the transaction it was made in", %{store: store} do
+      assert_raise RuntimeError, "boom", fn ->
+        Store.transaction(store, fn ->
+          Store.init_checkpoints(store, [%{name: "echo", position: 7}])
+          raise "boom"
+        end)
+      end
+
+      assert Store.checkpoint(store, "echo") == nil
     end
   end
 

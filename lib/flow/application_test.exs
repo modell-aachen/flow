@@ -5,7 +5,7 @@ defmodule Ariadne.Flow.ApplicationTest do
   alias Ariadne.Flow.CommandError
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
-  alias Ariadne.Flow.ConsistencyTimeoutError
+  alias Ariadne.Flow.PostCommitError
   alias Ariadne.Flow.Projection
   alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
@@ -13,6 +13,10 @@ defmodule Ariadne.Flow.ApplicationTest do
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Test.Repo
   alias Ecto.Adapters.SQL.Sandbox
+
+  # An isolated reactor failure is logged rather than raised, so the suite would otherwise
+  # print every deliberate failure it provokes.
+  @moduletag capture_log: true
 
   defmodule CountEvent do
     @derive Ariadne.Flow.Store.Event.Encoder
@@ -47,6 +51,19 @@ defmodule Ariadne.Flow.ApplicationTest do
     def reactor do
       Reactor.new(%{name: "boom", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
         {:error, :kaboom}
+      end)
+    end
+  end
+
+  # The same reactor once the cause of its failure is fixed: same name, so same checkpoint.
+  defmodule FixedBoomReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(%{name: "boom", filter: %{types: [CountEvent]}}, fn event, metadata ->
+        send(Process.get(:inbox), {:got, "boom", event, metadata})
+        :ok
       end)
     end
   end
@@ -100,6 +117,18 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
+  defmodule RaisingHistoryReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "raising-history", filter: %{types: [CountEvent]}, start_after_position: 0},
+        fn _event, _metadata -> raise "kaboom" end
+      )
+    end
+  end
+
   defmodule SyncCountsReactor do
     alias Ariadne.Flow.ApplicationTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -111,6 +140,18 @@ defmodule Ariadne.Flow.ApplicationTest do
           send(Process.get(:inbox), {:got, "sync-counts", event, metadata})
           :ok
         end
+      )
+    end
+  end
+
+  defmodule RaisingSyncReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "raising-sync", filter: %{types: [CountEvent]}, sync: true},
+        fn _event, _metadata -> raise "kaboom" end
       )
     end
   end
@@ -127,38 +168,28 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
-  defmodule RecordingEngine do
+  # A scheduler that reports every run as durably enqueued and hands it to another process
+  # after a delay, standing in for a job system. `delay: :never` is the job row that is
+  # written but never picked up — what Flow's own execution is not allowed to substitute for.
+  defmodule SchedulingEngine do
     @behaviour ReactorEngine
 
     @impl ReactorEngine
-    def run(payload, store, opts) do
-      send(self(), {:engine_run, payload, store, opts})
-      Keyword.get(opts, :result, :ok)
-    end
-  end
+    def schedule(reactor_runs, store, opts) do
+      send(self(), {:scheduled, reactor_runs, store, opts})
 
-  # An enqueue-first engine: it executes only the runs that could never be confirmed
-  # otherwise and defers the rest onto another process, standing in for a job system.
-  # `delay: :never` is the job that never gets around to running.
-  defmodule DeferringEngine do
-    @behaviour ReactorEngine
+      Enum.each(reactor_runs, &defer(&1, store, Keyword.get(opts, :delay, :never)))
 
-    @impl ReactorEngine
-    def run(reactor_run, store, opts) do
-      cond do
-        ReactorRun.inline?(reactor_run) -> ReactorRun.execute(reactor_run, store)
-        Keyword.get(opts, :delay, :never) == :never -> :ok
-        true -> defer(reactor_run, store, Keyword.fetch!(opts, :delay))
-      end
+      reactor_runs
     end
+
+    defp defer(_reactor_run, _store, :never), do: :ok
 
     defp defer(reactor_run, store, delay) do
       spawn(fn ->
         Process.sleep(delay)
         ReactorRun.execute(reactor_run, store)
       end)
-
-      :ok
     end
   end
 
@@ -203,10 +234,12 @@ defmodule Ariadne.Flow.ApplicationTest do
     Application.new(%{store: inbox_store(), reactors: reactors})
   end
 
-  # A raising reactor takes the InMemory agent down with it, so the store has to
-  # be one whose reactors run in the calling process to observe a rollback.
+  # A raising reactor takes the InMemory agent down with it, so a raise can only be
+  # observed on a store whose reactors run in the calling process.
   defp postgres_store do
     :ok = Sandbox.checkout(Repo)
+    Process.put(:inbox, self())
+
     Store.Postgres.init(repo: Repo, prefix: "postgres_store_test_schema")
   end
 
@@ -258,25 +291,39 @@ defmodule Ariadne.Flow.ApplicationTest do
                Application.new(%{store: store, reactors: [CountsReactor]})
     end
 
-    test "defaults reactors to an empty list and the engine to the inline engine" do
+    test "defaults reactors to an empty list and to no engine at all" do
       store = Store.InMemory.init()
 
-      assert %Application{store: ^store, reactors: [], engine: {ReactorEngine.Inline, []}} =
+      assert %Application{store: ^store, reactors: [], engine: nil} =
                Application.new(%{store: store})
     end
 
     test "normalizes a bare engine module to a {module, opts} pair" do
       store = Store.InMemory.init()
 
-      assert %Application{engine: {RecordingEngine, []}} =
-               Application.new(%{store: store, engine: RecordingEngine})
+      assert %Application{engine: {SchedulingEngine, []}} =
+               Application.new(%{store: store, engine: SchedulingEngine})
     end
 
     test "keeps an explicit {module, opts} engine" do
       store = Store.InMemory.init()
 
-      assert %Application{engine: {RecordingEngine, [foo: :bar]}} =
-               Application.new(%{store: store, engine: {RecordingEngine, foo: :bar}})
+      assert %Application{engine: {SchedulingEngine, [foo: :bar]}} =
+               Application.new(%{store: store, engine: {SchedulingEngine, foo: :bar}})
+    end
+
+    # Two reactors under one name share a checkpoint, so each would consume events the
+    # other never sees — a config error worth catching where the application is described.
+    test "refuses reactors that share a name, a name being what a checkpoint is keyed on" do
+      store = Store.InMemory.init()
+
+      assert_raise ArgumentError, ~r/distinctly named.*"boom"/, fn ->
+        Application.new(%{store: store, reactors: [BoomReactor, FixedBoomReactor]})
+      end
+
+      assert_raise ArgumentError, ~r/distinctly named/, fn ->
+        Application.new(%{store: store, reactors: [CountsReactor, CountsReactor]})
+      end
     end
   end
 
@@ -322,58 +369,6 @@ defmodule Ariadne.Flow.ApplicationTest do
                Application.dispatch(application, conflicting_count_command(store))
     end
 
-    test "raises a reactor failure with its name, position and reason" do
-      application = application([BoomReactor])
-
-      error =
-        assert_raise ReactorError, fn ->
-          Application.dispatch(application, count_command(1))
-        end
-
-      assert %ReactorError{failures: [%{name: "boom", position: position, reason: :kaboom}]} =
-               error
-
-      assert is_integer(position)
-    end
-
-    test "raises one error carrying every failure, having driven the reactors after a failing one" do
-      application = application([BoomReactor, CountsReactor, AlsoBoomReactor])
-
-      error =
-        assert_raise ReactorError, fn ->
-          Application.dispatch(application, count_command(1))
-        end
-
-      assert %ReactorError{
-               failures: [
-                 %{name: "boom", reason: :kaboom},
-                 %{name: "also-boom", reason: :kaboom_again}
-               ]
-             } = error
-
-      assert_received {:got, "counts", %CountEvent{count: 1}, _}
-    end
-
-    test "keeps the command's events when a reactor returns an error" do
-      store = postgres_store()
-      application = Application.new(%{store: store, reactors: [BoomReactor]})
-
-      assert_raise ReactorError, fn -> Application.dispatch(application, count_command(1)) end
-
-      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
-    end
-
-    test "rolls back the command's events when a reactor raises" do
-      store = postgres_store()
-      application = Application.new(%{store: store, reactors: [RaisingReactor]})
-
-      assert_raise RuntimeError, "kaboom", fn ->
-        Application.dispatch(application, count_command(1))
-      end
-
-      assert %{events: []} = Store.read(store)
-    end
-
     test "keeps the command's events when every reactor succeeds" do
       store = inbox_store()
       application = Application.new(%{store: store, reactors: [CountsReactor]})
@@ -383,27 +378,93 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert %{events: [%{event: %Store.Event{data: %{"count" => 1}}}]} = Store.read(store)
     end
 
-    test "puts the dispatch metadata on the run, defaulting to an empty map" do
+    test "hands the engine every run at once, with the dispatch metadata on each" do
       application =
         Application.new(%{
           store: Store.InMemory.init(),
-          reactors: [CountsReactor],
-          engine: {RecordingEngine, result: :ok}
+          reactors: [CountsReactor, HistoryReactor],
+          engine: {SchedulingEngine, foo: :bar}
         })
 
       assert {:ok, _} = Application.dispatch(application, count_command(1))
 
-      assert_received {:engine_run, %ReactorRun{reactor: CountsReactor, metadata: %{}}, _store,
-                       _opts}
+      assert_received {:scheduled, runs, _store, [foo: :bar]}
+
+      assert [
+               %ReactorRun{reactor: CountsReactor, metadata: %{}},
+               %ReactorRun{reactor: HistoryReactor, metadata: %{}}
+             ] = runs
 
       assert {:ok, _} =
                Application.dispatch(application, count_command(1),
                  metadata: %{"tenant_id" => "acme", "trace_id" => "abc123"}
                )
 
-      assert_received {:engine_run,
-                       %ReactorRun{metadata: %{"tenant_id" => "acme", "trace_id" => "abc123"}},
-                       _store, _opts}
+      assert_received {:scheduled, [%ReactorRun{metadata: %{"tenant_id" => "acme"}} | _], _store,
+                       _opts}
+    end
+  end
+
+  describe "dispatch/3 isolates an async reactor's failure" do
+    test "returns the dispatch's events when an async reactor errors" do
+      store = inbox_store()
+      application = Application.new(%{store: store, reactors: [BoomReactor]})
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
+               Application.dispatch(application, count_command(1))
+
+      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
+    end
+
+    test "keeps the command's events when an async reactor raises" do
+      store = postgres_store()
+      application = Application.new(%{store: store, reactors: [RaisingReactor]})
+
+      assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
+               Application.dispatch(application, count_command(1))
+
+      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
+    end
+
+    test "logs the failure and says the reactor will get another run" do
+      application = application([BoomReactor])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _} = Application.dispatch(application, count_command(1))
+        end)
+
+      assert log =~ ~s|reactor "boom" failed at position 0: :kaboom|
+      assert log =~ "checkpoint stayed put"
+    end
+
+    test "runs every reactor declared after a failing one" do
+      application = application([BoomReactor, CountsReactor, AlsoBoomReactor])
+
+      assert {:ok, _} = Application.dispatch(application, count_command(1))
+
+      assert_received {:got, "counts", %CountEvent{count: 1}, _}
+    end
+
+    # The checkpoint is parked in front of the event the reactor choked on, so the events
+    # are reacted to at least once — a later run picks them up once the cause is fixed.
+    test "leaves the failed reactor's checkpoint where it can retry the events" do
+      store = inbox_store()
+
+      assert {:ok, _} =
+               Application.dispatch(
+                 Application.new(%{store: store, reactors: [BoomReactor]}),
+                 count_command(1)
+               )
+
+      assert Store.checkpoint(store, "boom") == 0
+
+      assert :ok =
+               Application.catch_up(
+                 Application.new(%{store: store, reactors: [FixedBoomReactor]})
+               )
+
+      assert_received {:got, "boom", %CountEvent{count: 1}, _}
     end
   end
 
@@ -535,22 +596,33 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:telemetry, :stop, %{attempts: 1}, %{result: :error}}
     end
 
-    test "reports a reactor failure as an exception, the events being committed" do
-      assert_raise ReactorError, fn ->
-        Application.dispatch(application([BoomReactor]), count_command(1))
+    test "reports a sync reactor's failure as an exception, the events being committed" do
+      assert_raise PostCommitError, fn ->
+        Application.dispatch(application([BoomSyncReactor]), count_command(1))
       end
 
-      assert_received {:telemetry, :exception, _, %{kind: :error, reason: %ReactorError{}}}
+      assert_received {:telemetry, :exception, _, %{kind: :error, reason: %PostCommitError{}}}
+    end
+
+    test "reports an async reactor's failure as an ordinary dispatch, not an exception" do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _} = Application.dispatch(application([BoomReactor]), count_command(1))
+        end)
+
+      assert log =~ "boom"
+      assert_received {:telemetry, :stop, %{attempts: 1}, %{result: :ok}}
+      refute_received {:telemetry, :exception, _, _}
     end
   end
 
   describe "dispatch/3 awaits its sync reactors" do
-    test "returns once a deferred sync run has advanced the reactor's checkpoint" do
+    test "returns once a scheduled sync run has advanced the reactor's checkpoint" do
       application =
         Application.new(%{
           store: inbox_store(),
           reactors: [SyncCountsReactor],
-          engine: {DeferringEngine, delay: 20}
+          engine: {SchedulingEngine, delay: 20}
         })
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
@@ -559,7 +631,9 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
-    test "confirms instantly when the engine ran the reactor inline" do
+    # With no engine there is nothing to poll for: Flow ran the reactor itself before the
+    # wait began, so the first look at the checkpoint confirms.
+    test "confirms without polling delay when Flow ran the reactor itself" do
       application = Application.new(%{store: inbox_store(), reactors: [SyncCountsReactor]})
 
       assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 0)
@@ -567,20 +641,21 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
-    test "raises a consistency timeout naming the reactor and the position it awaited" do
+    test "raises a post-commit timeout naming the reactor and the position it awaited" do
       application =
         Application.new(%{
           store: inbox_store(),
           reactors: [SyncCountsReactor],
-          engine: DeferringEngine
+          engine: SchedulingEngine
         })
 
       error =
-        assert_raise ConsistencyTimeoutError, fn ->
+        assert_raise PostCommitError, fn ->
           Application.dispatch(application, count_command(1), await_timeout: 50)
         end
 
-      assert %ConsistencyTimeoutError{
+      assert %PostCommitError{
+               reason: :timeout,
                unconfirmed: [%{name: "sync-counts", position: 1}],
                timeout: 50
              } = error
@@ -592,21 +667,21 @@ defmodule Ariadne.Flow.ApplicationTest do
       store = inbox_store()
 
       application =
-        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: DeferringEngine})
+        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: SchedulingEngine})
 
-      assert_raise ConsistencyTimeoutError, fn ->
+      assert_raise PostCommitError, fn ->
         Application.dispatch(application, count_command(1), await_timeout: 50)
       end
 
       assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
     end
 
-    test "does not await an async reactor the engine deferred" do
+    test "does not await an async reactor the engine scheduled" do
       application =
         Application.new(%{
           store: inbox_store(),
           reactors: [CountsReactor],
-          engine: DeferringEngine
+          engine: SchedulingEngine
         })
 
       assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 0)
@@ -621,39 +696,90 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
-    test "raises the reactor's failure rather than waiting the timeout out" do
+    test "raises the reactor's own failure rather than waiting the timeout out" do
       application = Application.new(%{store: inbox_store(), reactors: [BoomSyncReactor]})
 
-      assert_raise ReactorError, fn ->
-        Application.dispatch(application, count_command(1), await_timeout: 10_000)
+      error =
+        assert_raise PostCommitError, fn ->
+          Application.dispatch(application, count_command(1), await_timeout: 10_000)
+        end
+
+      assert %PostCommitError{
+               reason: :failure,
+               failures: [%{name: "boom-sync", reason: :kaboom}]
+             } = error
+    end
+
+    # The raise carries the message but not the origin, so the reactor that aborted the
+    # request would otherwise be the one failure with no trace to find it by.
+    test "logs a raising sync reactor's stacktrace, which the raise itself cannot carry" do
+      store = postgres_store()
+      application = Application.new(%{store: store, reactors: [RaisingSyncReactor]})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert_raise PostCommitError, fn ->
+            Application.dispatch(application, count_command(1), await_timeout: 0)
+          end
+        end)
+
+      assert log =~ ~s|reactor "raising-sync" failed|
+      assert log =~ "application_test.exs"
+    end
+
+    # A sync reactor failing inside somebody else's job system is invisible here, so the
+    # wait is all the dispatch has — and it runs out.
+    test "times out on a sync reactor whose failure it cannot see" do
+      application =
+        Application.new(%{
+          store: inbox_store(),
+          reactors: [BoomSyncReactor],
+          engine: SchedulingEngine
+        })
+
+      assert_raise PostCommitError, ~r/did not catch up/, fn ->
+        Application.dispatch(application, count_command(1), await_timeout: 50)
       end
+    end
+
+    test "isolates an async failure from the sync reactors it is declared beside" do
+      application =
+        Application.new(%{store: inbox_store(), reactors: [BoomReactor, SyncCountsReactor]})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 50)
+        end)
+
+      assert log =~ ~s|reactor "boom" failed|
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
   end
 
   describe "dispatch/3 nested in an outer transaction" do
-    test "tells the engine the run is nested, so it can see it must not defer it" do
+    test "never offers a sync run to the engine, running it itself instead" do
       store = inbox_store()
 
       application =
         Application.new(%{
           store: store,
-          reactors: [SyncCountsReactor],
-          engine: {RecordingEngine, result: :ok}
+          reactors: [SyncCountsReactor, CountsReactor],
+          engine: SchedulingEngine
         })
 
-      Store.transaction(store, fn -> Application.dispatch(application, count_command(1)) end)
+      Store.transaction(store, fn ->
+        Application.dispatch(application, count_command(1), await_timeout: 0)
+      end)
 
-      assert_received {:engine_run, %ReactorRun{reactor: SyncCountsReactor, nested: true} = run,
-                       _store, _opts}
-
-      assert ReactorRun.inline?(run)
+      assert_received {:scheduled, [%ReactorRun{reactor: CountsReactor}], _store, _opts}
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
-    test "executes the sync run inline instead of awaiting a confirmation that cannot come" do
+    test "runs the sync reactor instead of awaiting a confirmation that cannot come" do
       store = inbox_store()
 
       application =
-        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: DeferringEngine})
+        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: SchedulingEngine})
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
                Store.transaction(store, fn ->
@@ -663,12 +789,11 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
-    test "runs inline under a repo transaction the dispatch knows nothing about" do
+    test "runs the sync reactor under a repo transaction the dispatch knows nothing about" do
       store = postgres_store()
-      Process.put(:inbox, self())
 
       application =
-        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: DeferringEngine})
+        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: SchedulingEngine})
 
       assert {:ok, _} =
                Repo.transaction(fn ->
@@ -678,6 +803,58 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
+    # Its work lands after the outer commit either way — through the job row the engine
+    # wrote inside that transaction, or through the next dispatch or catch-up.
+    test "leaves an async reactor to whatever runs after the outer commit" do
+      store = inbox_store()
+      application = Application.new(%{store: store, reactors: [CountsReactor]})
+
+      assert {:ok, _} =
+               Store.transaction(store, fn ->
+                 Application.dispatch(application, count_command(1))
+               end)
+
+      refute_received {:got, "counts", _, _}
+      assert Store.checkpoint(store, "counts") == 0
+
+      assert :ok = Application.catch_up(application)
+
+      assert_received {:got, "counts", %CountEvent{count: 1}, _}
+    end
+
+    # The dispatch has no transaction of its own to protect here, and the caller declared
+    # it wanted this reactor's work — so the failure goes to whoever owns the transaction.
+    test "raises a sync reactor's failure into the caller's transaction" do
+      store = inbox_store()
+      application = Application.new(%{store: store, reactors: [BoomSyncReactor]})
+
+      assert_raise PostCommitError, ~r/sync reactor "boom-sync" failed/, fn ->
+        Store.transaction(store, fn ->
+          Application.dispatch(application, count_command(1), await_timeout: 0)
+        end)
+      end
+    end
+
+    # The raise goes back through the caller's transaction, so the events it carries are
+    # undone with it — telling the caller never to re-dispatch would lose the write.
+    test "does not claim the events are committed when they are the caller's to roll back" do
+      store = postgres_store()
+      application = Application.new(%{store: store, reactors: [BoomSyncReactor]})
+
+      error =
+        assert_raise PostCommitError, fn ->
+          Store.transaction(store, fn ->
+            Application.dispatch(application, count_command(1), await_timeout: 0)
+          end)
+        end
+
+      assert %PostCommitError{reason: :failure, nested: true} = error
+      assert Exception.message(error) =~ "the transaction you opened"
+      refute Exception.message(error) =~ "never re-dispatch"
+
+      assert %{events: []} = Store.read(store)
+    end
+
     test "is not treated as nested when the caller opened no transaction" do
       store = postgres_store()
 
@@ -685,14 +862,14 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{
           store: store,
           reactors: [SyncCountsReactor],
-          engine: {RecordingEngine, result: :ok}
+          engine: SchedulingEngine
         })
 
-      assert_raise ConsistencyTimeoutError, fn ->
+      assert_raise PostCommitError, fn ->
         Application.dispatch(application, count_command(1), await_timeout: 50)
       end
 
-      assert_received {:engine_run, %ReactorRun{nested: false}, _store, _opts}
+      assert_received {:scheduled, [%ReactorRun{reactor: SyncCountsReactor}], _store, _opts}
     end
   end
 
@@ -730,12 +907,12 @@ defmodule Ariadne.Flow.ApplicationTest do
       end
     end
 
-    test "raises when a reactor fails" do
-      application = application([BoomReactor])
+    test "raises when a sync reactor fails" do
+      application = application([BoomSyncReactor])
 
-      assert_raise ReactorError, ~r/reactor "boom" failed at position \d+: :kaboom/, fn ->
-        Application.dispatch!(application, count_command(1))
-      end
+      assert_raise PostCommitError,
+                   ~r/sync reactor "boom-sync" failed at position \d+: :kaboom/,
+                   fn -> Application.dispatch!(application, count_command(1)) end
     end
 
     test "raises when a sync reactor does not confirm in time" do
@@ -743,10 +920,10 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{
           store: inbox_store(),
           reactors: [SyncCountsReactor],
-          engine: DeferringEngine
+          engine: SchedulingEngine
         })
 
-      assert_raise ConsistencyTimeoutError, ~r/never re-dispatch/, fn ->
+      assert_raise PostCommitError, ~r/never re-dispatch/, fn ->
         Application.dispatch!(application, count_command(1), await_timeout: 50)
       end
     end
@@ -798,27 +975,48 @@ defmodule Ariadne.Flow.ApplicationTest do
                Application.catch_up(application)
     end
 
-    test "puts the given metadata on the run and marks it nested inside a transaction" do
+    test "offers its runs to the engine, carrying the metadata it was given" do
       store = inbox_store()
       writer = Application.new(%{store: store})
       {:ok, _} = Application.dispatch(writer, count_command(1))
 
       application =
-        Application.new(%{
-          store: store,
-          reactors: [HistoryReactor],
-          engine: {RecordingEngine, result: :ok}
-        })
+        Application.new(%{store: store, reactors: [HistoryReactor], engine: SchedulingEngine})
 
       assert :ok = Application.catch_up(application, metadata: %{"trace_id" => "abc123"})
 
-      assert_received {:engine_run,
-                       %ReactorRun{metadata: %{"trace_id" => "abc123"}, nested: false}, _store,
-                       _opts}
+      assert_received {:scheduled, [%ReactorRun{metadata: %{"trace_id" => "abc123"}}], _store, _}
+    end
 
-      Store.transaction(store, fn -> Application.catch_up(application) end)
+    # A catch-up has no events of its own to hide, so nesting changes nothing about it:
+    # it runs its reactors, and its writes belong to the caller's transaction like any other.
+    test "runs its reactors inside a transaction the caller opened" do
+      store = inbox_store()
+      writer = Application.new(%{store: store})
+      {:ok, _} = Application.dispatch(writer, count_command(1))
 
-      assert_received {:engine_run, %ReactorRun{metadata: %{}, nested: true}, _store, _opts}
+      application = Application.new(%{store: store, reactors: [HistoryReactor]})
+
+      assert :ok = Store.transaction(store, fn -> Application.catch_up(application) end)
+
+      assert_received {:got, "history", %CountEvent{count: 1}, _}
+      assert Store.checkpoint(store, "history") == 1
+    end
+
+    test "returns a raising reactor's failure as a value too, having run the rest" do
+      store = postgres_store()
+
+      {:ok, _} =
+        Application.dispatch(Application.new(%{store: store}), count_command(1))
+
+      application =
+        Application.new(%{store: store, reactors: [RaisingHistoryReactor, HistoryReactor]})
+
+      assert {:error, %ReactorError{failures: [%{name: "raising-history", reason: reason}]}} =
+               Application.catch_up(application)
+
+      assert %RuntimeError{message: "kaboom"} = reason
+      assert_received {:got, "history", %CountEvent{count: 1}, _}
     end
   end
 

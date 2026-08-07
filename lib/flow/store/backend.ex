@@ -35,6 +35,12 @@ defmodule Ariadne.Flow.Store.Backend do
   @typedoc "What a read and a successful append return: the events, in position order."
   @type read_result :: %{events: [SequencedEvent.t()]}
 
+  @typedoc """
+  Where a reactor that has no checkpoint yet is to resume from: the name the checkpoint is
+  keyed on, and the position the reactor starts after.
+  """
+  @type checkpoint_init :: %{name: String.t(), position: non_neg_integer()}
+
   @doc """
   Builds a store backed by this module.
 
@@ -77,22 +83,38 @@ defmodule Ariadne.Flow.Store.Backend do
   @doc """
   Hands the reactor its next batch of unconsumed events and records how far it got.
 
-  Where the batch starts is the reactor's stored checkpoint, or its
-  `start_after_position` when it has none yet. The handler reports back how many events
-  of the batch it processed, and the new checkpoint is the position of the last of
-  those — a handler that fails part-way through leaves the rest to be delivered again.
-  The batch size is the backend's own choice.
+  Where the batch starts is the reactor's stored checkpoint, or the store's origin when
+  it has none — a reactor is given a checkpoint by `c:init_checkpoints/2` before anything
+  runs it, so the origin is the resume point of a reactor nobody ever declared. The
+  handler reports back how many events of the batch it processed, and the new checkpoint
+  is the position of the last of those — a handler that fails part-way through leaves the
+  rest to be delivered again. The batch size is the backend's own choice.
   """
   @callback consume(config(), StoredEventReactor.t()) :: ConsumeResult.t()
 
   @doc """
+  Creates the checkpoints of the reactors that have none, leaving every existing one where
+  it stands.
+
+  This is what decides where a reactor starts, and it is called with the events of the
+  append it belongs to still uncommitted, so a reactor starting *from now* is pinned to
+  the first events it is meant to see. The write therefore has to be atomic against
+  concurrent appends: a backend that serialises appends on a lock held for the whole
+  transaction already is, and one that does not has to make "insert the ones that are
+  missing" a single atomic step.
+
+  Moving an existing checkpoint is never right here — it is where a reactor stands, and
+  the declaration only ever says where a reactor that has never run begins.
+  """
+  @callback init_checkpoints(config(), [checkpoint_init()]) :: :ok
+
+  @doc """
   Returns the position the reactor's stored checkpoint stands at, `nil` when it has none.
 
-  This is the stored value alone — where a reactor would resume, not counting the
-  `start_after_position` a run falls back to before its first checkpoint exists. It is
-  what makes a reactor's progress observable without consuming: a caller that needs to
-  know whether a reactor has caught up to an appended event compares this to its
-  position.
+  It is what makes a reactor's progress observable without consuming: a caller that needs
+  to know whether a reactor has caught up to an appended event compares this to its
+  position. `nil` says the reactor has never been declared to this store, which is the
+  only thing that separates it from one parked at the origin.
   """
   @callback checkpoint(config(), name :: String.t()) :: non_neg_integer() | nil
 

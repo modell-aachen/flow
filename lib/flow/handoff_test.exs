@@ -5,9 +5,12 @@ defmodule Ariadne.Flow.HandoffTest do
   alias Ariadne.Flow.Handoff
   alias Ariadne.Flow.Projection
   alias Ariadne.Flow.ReactorEngine
-  alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
+  alias Ariadne.Flow.Test.Repo
+  alias Ecto.Adapters.SQL.Sandbox
+
+  @moduletag capture_log: true
 
   defmodule CountEvent do
     @derive Ariadne.Flow.Store.Event.Encoder
@@ -56,6 +59,11 @@ defmodule Ariadne.Flow.HandoffTest do
     def reactor, do: Recorder.reactor("from-position", %{start_after_position: 1})
   end
 
+  defmodule SyncReactor do
+    alias Ariadne.Flow.HandoffTest.Recorder
+    def reactor, do: Recorder.reactor("sync", %{sync: true})
+  end
+
   defmodule BoomFromOriginReactor do
     alias Ariadne.Flow.HandoffTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -63,33 +71,6 @@ defmodule Ariadne.Flow.HandoffTest do
     def reactor do
       Reactor.new(
         %{name: "boom-from-origin", filter: %{types: [CountEvent]}, start_after_position: 0},
-        fn _event, _metadata -> {:error, :kaboom} end
-      )
-    end
-  end
-
-  defmodule SyncReactor do
-    alias Ariadne.Flow.HandoffTest.CountEvent
-    alias Ariadne.Flow.Reactor
-
-    def reactor do
-      Reactor.new(
-        %{name: "sync", filter: %{types: [CountEvent]}, sync: true},
-        fn event, metadata ->
-          send(Process.get(:inbox), {:got, "sync", event, metadata})
-          :ok
-        end
-      )
-    end
-  end
-
-  defmodule BoomSyncReactor do
-    alias Ariadne.Flow.HandoffTest.CountEvent
-    alias Ariadne.Flow.Reactor
-
-    def reactor do
-      Reactor.new(
-        %{name: "boom-sync", filter: %{types: [CountEvent]}, sync: true},
         fn _event, _metadata -> {:error, :kaboom} end
       )
     end
@@ -106,31 +87,81 @@ defmodule Ariadne.Flow.HandoffTest do
     end
   end
 
-  defmodule RecordingEngine do
-    @behaviour ReactorEngine
+  defmodule RaisingReactor do
+    alias Ariadne.Flow.HandoffTest.CountEvent
+    alias Ariadne.Flow.Reactor
 
-    @impl ReactorEngine
-    def run(payload, store, opts) do
-      send(self(), {:engine_run, payload, store, opts})
-      Keyword.get(opts, :result, :ok)
+    def reactor do
+      Reactor.new(%{name: "raising", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
+        raise "kaboom"
+      end)
     end
   end
 
-  defmodule DeferringEngine do
-    @behaviour ReactorEngine
+  # What a handler that talks to a dead process does — an exit rather than an exception.
+  defmodule ExitingReactor do
+    alias Ariadne.Flow.HandoffTest.CountEvent
+    alias Ariadne.Flow.Reactor
 
-    @impl ReactorEngine
-    def run(reactor_run, store, _opts) do
-      if ReactorRun.sync?(reactor_run) do
-        ReactorRun.execute(reactor_run, store)
-      else
-        send(self(), {:deferred, reactor_run})
-        :ok
-      end
+    def reactor do
+      Reactor.new(%{name: "exiting", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
+        exit(:noproc)
+      end)
     end
   end
 
-  @inline {ReactorEngine.Inline, []}
+  defmodule ThrowingReactor do
+    alias Ariadne.Flow.HandoffTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(%{name: "throwing", filter: %{types: [CountEvent]}}, fn _event, _metadata ->
+        throw(:nope)
+      end)
+    end
+  end
+
+  # A scheduler that reports every run it is handed as durably enqueued without doing
+  # anything about it — what Flow does with a run it believes is somebody else's.
+  defmodule SchedulingEngine do
+    @behaviour ReactorEngine
+
+    @impl ReactorEngine
+    def schedule(reactor_runs, store, opts) do
+      send(self(), {:scheduled, reactor_runs, store, opts})
+
+      Keyword.get(opts, :schedules, reactor_runs)
+    end
+  end
+
+  defmodule NothingScheduledEngine do
+    @behaviour ReactorEngine
+
+    @impl ReactorEngine
+    def schedule(reactor_runs, _store, _opts) do
+      send(self(), {:offered, reactor_runs})
+
+      []
+    end
+  end
+
+  # What an engine that dumps its job args and hands back what it would enqueue looks like:
+  # the round trip stringifies metadata keys, so the runs come back as equal-but-not-identical
+  # terms.
+  defmodule RoundTrippingEngine do
+    @behaviour ReactorEngine
+
+    @impl ReactorEngine
+    def schedule(reactor_runs, _store, _opts) do
+      Enum.map(reactor_runs, fn reactor_run ->
+        reactor_run
+        |> ReactorRun.dump()
+        |> Jason.encode!()
+        |> Jason.decode!()
+        |> ReactorRun.load()
+      end)
+    end
+  end
 
   defp num_counts_projection do
     Projection.new(
@@ -158,6 +189,15 @@ defmodule Ariadne.Flow.HandoffTest do
     store
   end
 
+  # A raising reactor takes the InMemory agent down with it, so a raise can only be
+  # observed on a store whose reactors run in the calling process.
+  defp postgres_store do
+    :ok = Sandbox.checkout(Repo)
+    Process.put(:inbox, self())
+
+    Store.Postgres.init(repo: Repo, prefix: "postgres_store_test_schema")
+  end
+
   defp append(store, increase \\ 1) do
     {:ok, %{events: events}} =
       CommandHandler.handle(CommandHandler.new(%{command: count_command(increase)}), store)
@@ -165,68 +205,161 @@ defmodule Ariadne.Flow.HandoffTest do
     events
   end
 
-  defp hand_off(reactors, store, events, engine \\ @inline, attrs \\ %{}) do
+  defp hand_off(reactors, store, events, attrs \\ %{}) do
     attrs
-    |> Map.merge(%{reactors: reactors, engine: engine})
+    |> Map.merge(%{reactors: reactors})
     |> Handoff.new()
     |> Handoff.hand_off(store, events)
   end
 
-  defp catch_up(reactors, store, engine \\ @inline, attrs \\ %{}) do
+  defp drive(reactors, store, events, attrs \\ %{}) do
+    reactors
+    |> hand_off(store, events, attrs)
+    |> Handoff.execute(store)
+  end
+
+  defp catch_up(reactors, store, attrs \\ %{}) do
     attrs
-    |> Map.merge(%{reactors: reactors, engine: engine})
+    |> Map.merge(%{reactors: reactors})
     |> Handoff.new()
     |> Handoff.catch_up(store)
+    |> Handoff.execute(store)
   end
 
   describe "new/1" do
-    test "normalizes a bare engine module to a {module, opts} pair" do
-      assert %Handoff{engine: {RecordingEngine, []}} =
-               Handoff.new(%{reactors: [CountsReactor], engine: RecordingEngine})
+    test "defaults to no engine at all, so every run is Flow's to execute" do
+      assert %Handoff{engine: nil, metadata: %{}, nested: false} =
+               Handoff.new(%{reactors: [CountsReactor]})
     end
 
-    test "keeps an explicit {module, opts} engine, defaulting metadata and nested" do
-      assert %Handoff{engine: {RecordingEngine, [foo: :bar]}, metadata: %{}, nested: false} =
-               Handoff.new(%{reactors: [CountsReactor], engine: {RecordingEngine, foo: :bar}})
+    test "normalizes a bare engine module to a {module, opts} pair" do
+      assert %Handoff{engine: {SchedulingEngine, []}} =
+               Handoff.new(%{reactors: [CountsReactor], engine: SchedulingEngine})
+    end
+
+    test "keeps an explicit {module, opts} engine" do
+      assert %Handoff{engine: {SchedulingEngine, [foo: :bar]}} =
+               Handoff.new(%{reactors: [CountsReactor], engine: {SchedulingEngine, foo: :bar}})
     end
   end
 
   describe "hand_off/3 short-circuits" do
-    test "returns :ok without touching reactors when there are no events" do
+    test "returns no runs when there are no events" do
       store = inbox_store()
 
-      assert :ok = hand_off([BoomReactor], store, [])
+      assert [] = hand_off([BoomReactor], store, [])
     end
 
-    test "returns :ok when there are no reactors" do
+    test "returns no runs when there are no reactors" do
       store = inbox_store()
       events = append(store)
 
-      assert :ok = hand_off([], store, events)
+      assert [] = hand_off([], store, events)
     end
   end
 
-  describe "hand_off/3 drives reactors with only a store, reactors and events" do
-    test "runs every reactor inline under the default engine over the given events" do
+  describe "hand_off/3 with no engine" do
+    test "hands back one run per reactor, in declaration order" do
       store = inbox_store()
       events = append(store)
 
-      assert :ok =
+      assert [%ReactorRun{reactor: AlphaReactor}, %ReactorRun{reactor: BetaReactor}] =
                hand_off([AlphaReactor, BetaReactor], store, events)
+    end
+
+    test "puts the metadata it was given on every run" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [%ReactorRun{metadata: %{"tenant_id" => "acme"}}] =
+               hand_off([CountsReactor], store, events, %{metadata: %{"tenant_id" => "acme"}})
+    end
+  end
+
+  describe "hand_off/3 initializes checkpoints" do
+    test "starts a reactor that declared no position right before the dispatch's events" do
+      store = inbox_store()
+      _earlier = append(store)
+      events = append(store)
+
+      hand_off([CountsReactor], store, events)
+
+      assert Store.checkpoint(store, "counts") == 1
+    end
+
+    test "starts a reactor that declared a position exactly there" do
+      store = inbox_store()
+      _earlier = append(store)
+      events = append(store)
+
+      hand_off([FromOriginReactor, FromPositionReactor], store, events)
+
+      assert Store.checkpoint(store, "from-origin") == 0
+      assert Store.checkpoint(store, "from-position") == 1
+    end
+
+    test "leaves a reactor that already has a checkpoint where it stands" do
+      store = inbox_store()
+      first = append(store)
+
+      drive([CountsReactor], store, first)
+      assert Store.checkpoint(store, "counts") == 1
+
+      Store.append(store, [%Store.Event{type: "Unrelated", data: %{}, tags: []}])
+      hand_off([CountsReactor], store, append(store))
+
+      assert Store.checkpoint(store, "counts") == 1
+    end
+
+    # A run lost between the commit and its execution costs promptness, not events: the
+    # checkpoint that says where the reactor starts was written with the events themselves.
+    test "starts a reactor even when nothing ever executes its run" do
+      store = inbox_store()
+      _earlier = append(store)
+      events = append(store)
+
+      assert [] = drive([CountsReactor], store, events, %{engine: SchedulingEngine})
+
+      assert Store.checkpoint(store, "counts") == 1
+      refute_received {:got, "counts", _, _}
+
+      assert [] = catch_up([CountsReactor], store)
+
+      assert_received {:got, "counts", %CountEvent{count: 2}, _}
+    end
+  end
+
+  describe "execute/2" do
+    test "drives every run over the events its reactor has not seen" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [] = drive([AlphaReactor, BetaReactor], store, events)
 
       assert_received {:got, "alpha", %CountEvent{count: 1}, _}
       assert_received {:got, "beta", %CountEvent{count: 1}, _}
     end
 
-    test "drives reactors only over the events it is given, not earlier ones" do
+    test "drives a reactor only over the events after its checkpoint" do
       store = inbox_store()
       _earlier = append(store)
       events = append(store)
 
-      assert :ok = hand_off([CountsReactor], store, events)
+      assert [] = drive([CountsReactor], store, events)
 
       assert_received {:got, "counts", %CountEvent{count: 2}, _}
       refute_received {:got, "counts", %CountEvent{count: 1}, _}
+    end
+
+    test "drives a reactor that declared history over all of it" do
+      store = inbox_store()
+      _earlier = append(store)
+      events = append(store)
+
+      assert [] = drive([FromOriginReactor], store, events)
+
+      assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
+      assert_received {:got, "from-origin", %CountEvent{count: 2}, _}
     end
 
     test "drives reactors across batch boundaries until fully drained" do
@@ -243,55 +376,221 @@ defmodule Ariadne.Flow.HandoffTest do
       {:ok, %{events: events}} =
         CommandHandler.handle(CommandHandler.new(%{command: bulk_command}), store)
 
-      assert :ok = hand_off([CountsReactor], store, events)
+      assert [] = drive([CountsReactor], store, events)
 
       Enum.each(1..total, fn _ -> assert_received {:got, "counts", _, _} end)
       refute_received {:got, "counts", _, _}
     end
+
+    test "reports a failed reactor with its run, name, position and reason" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [failure] = drive([BoomReactor], store, events)
+
+      assert %{
+               run: %ReactorRun{reactor: BoomReactor},
+               name: "boom",
+               position: position,
+               reason: :kaboom,
+               stacktrace: nil
+             } = failure
+
+      assert is_integer(position)
+    end
+
+    test "reports a raising reactor as a failure carrying the exception and its stacktrace" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "raising", position: nil, kind: :error, reason: reason} = failure] =
+               drive([RaisingReactor], store, events)
+
+      assert %RuntimeError{message: "kaboom"} = reason
+      assert is_list(failure.stacktrace)
+    end
+
+    # A handler talking to a dead process exits rather than raises, and an exit escaping
+    # here would take an already-committed dispatch down with it.
+    test "contains an exiting reactor, the way it contains a raising one" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "exiting", kind: :exit, reason: :noproc, stacktrace: stacktrace}] =
+               drive([ExitingReactor], store, events)
+
+      assert is_list(stacktrace)
+    end
+
+    test "contains a throwing reactor" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "throwing", kind: :throw, reason: :nope}] =
+               drive([ThrowingReactor], store, events)
+    end
+
+    test "runs the reactors after one that exited" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "exiting"}] = drive([ExitingReactor, AlphaReactor], store, events)
+
+      assert_received {:got, "alpha", _, _}
+    end
+
+    test "runs every reactor declared after a failing one, in declaration order" do
+      store = postgres_store()
+      events = append(store)
+
+      assert [%{name: "boom"}, %{name: "raising"}] =
+               drive([BoomReactor, AlphaReactor, RaisingReactor, BetaReactor], store, events)
+
+      assert_received {:got, "alpha", _, _}
+      assert_received {:got, "beta", _, _}
+    end
+
+    test "emits telemetry for every failure it collects" do
+      handler = "reactor-failure-test-#{inspect(self())}"
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler,
+          [:ariadne, :flow, :reactor, :failure],
+          fn _event, measurements, metadata, _ ->
+            send(test_pid, {:telemetry, measurements, metadata})
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      store = inbox_store()
+      events = append(store)
+
+      assert [_] = drive([BoomReactor], store, events)
+
+      assert_received {:telemetry, %{system_time: _},
+                       %{name: "boom", position: position, reason: :kaboom}}
+
+      assert is_integer(position)
+    end
   end
 
-  describe "hand_off/3 resolves the reactor's start_after_position" do
-    test "starts a :head reactor right before the events it is handed" do
+  describe "summarize/1" do
+    test "keeps only what an error carries about a failure" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [summary] =
+               [BoomReactor]
+               |> drive(store, events)
+               |> Handoff.summarize()
+
+      assert Map.keys(summary) == [:name, :position, :reason]
+    end
+  end
+
+  describe "hand_off/3 offers the runs to the engine" do
+    test "hands it every run at once, together with the store and its configured opts" do
       store = Store.InMemory.init()
-      _earlier = append(store)
       events = append(store)
 
-      assert :ok = hand_off([CountsReactor], store, events, {RecordingEngine, result: :ok})
+      assert [] =
+               hand_off([CountsReactor, AlphaReactor], store, events, %{
+                 engine: {SchedulingEngine, foo: :bar}
+               })
 
-      assert_received {:engine_run, %ReactorRun{start_after_position: 1}, _store, _opts}
+      assert_received {:scheduled, runs, ^store, opts}
+      assert [%ReactorRun{reactor: CountsReactor}, %ReactorRun{reactor: AlphaReactor}] = runs
+      assert opts == [foo: :bar]
     end
 
-    test "passes a declared position through, so a first run picks up the history it asked for" do
+    test "keeps the runs the engine did not report as scheduled" do
       store = inbox_store()
-      _earlier = append(store)
       events = append(store)
 
-      assert :ok = hand_off([FromOriginReactor], store, events)
+      assert [] = hand_off([CountsReactor], store, events, %{engine: SchedulingEngine})
 
-      assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
-      assert_received {:got, "from-origin", %CountEvent{count: 2}, _}
+      assert [%ReactorRun{reactor: CountsReactor}] =
+               hand_off([CountsReactor], store, events, %{engine: NothingScheduledEngine})
+
+      assert_received {:offered, [%ReactorRun{reactor: CountsReactor}]}
     end
 
-    test "starts a declared position where the reactor asked, not where the dispatch begins" do
+    # Reported as scheduled is reported as scheduled, however the engine got the value
+    # back — a job engine that returns what it dumped and reloaded means the same thing.
+    test "recognizes a claimed run the engine rebuilt rather than handed back" do
       store = inbox_store()
-      _earlier = append(store)
-      _earlier = append(store)
       events = append(store)
 
-      assert :ok = hand_off([FromPositionReactor], store, events)
+      assert [] =
+               drive([CountsReactor], store, events, %{engine: RoundTrippingEngine})
 
-      assert_received {:got, "from-position", %CountEvent{count: 2}, _}
-      assert_received {:got, "from-position", %CountEvent{count: 3}, _}
-      refute_received {:got, "from-position", %CountEvent{count: 1}, _}
+      refute_received {:got, "counts", _, _}
+    end
+
+    test "keeps the runs a partial scheduler left behind" do
+      store = inbox_store()
+      events = append(store)
+
+      scheduled = [ReactorRun.new(%{reactor: AlphaReactor})]
+
+      assert [%ReactorRun{reactor: CountsReactor}] =
+               hand_off([CountsReactor, AlphaReactor], store, events, %{
+                 engine: {SchedulingEngine, schedules: scheduled}
+               })
+    end
+  end
+
+  describe "hand_off/3 nested in an outer transaction" do
+    test "keeps the sync runs and never offers them to the engine" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [%ReactorRun{reactor: SyncReactor}] =
+               hand_off([SyncReactor, CountsReactor], store, events, %{
+                 engine: SchedulingEngine,
+                 nested: true
+               })
+
+      assert_received {:scheduled, [%ReactorRun{reactor: CountsReactor}], _store, _opts}
+    end
+
+    # The async run's work lands after the outer commit either way — through a job row the
+    # engine inserted, or through the next dispatch or catch-up.
+    test "drops an async run the engine did not schedule rather than executing it" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [] =
+               drive([CountsReactor], store, events, %{
+                 engine: NothingScheduledEngine,
+                 nested: true
+               })
+
+      assert_received {:offered, [%ReactorRun{reactor: CountsReactor}]}
+      refute_received {:got, "counts", _, _}
+      assert Store.checkpoint(store, "counts") == 0
+    end
+
+    test "drops an async run with no engine to offer it to" do
+      store = inbox_store()
+      events = append(store)
+
+      assert [] = drive([CountsReactor], store, events, %{nested: true})
+
+      refute_received {:got, "counts", _, _}
     end
   end
 
   describe "catch_up/2" do
-    test "returns :ok when there are no reactors" do
+    test "returns no runs when there are no reactors" do
       store = inbox_store()
       _events = append(store)
 
-      assert :ok = catch_up([], store)
+      assert [] = catch_up([], store)
     end
 
     test "drives a reactor over the history it declared, with no dispatch to hand it events" do
@@ -299,83 +598,85 @@ defmodule Ariadne.Flow.HandoffTest do
       _events = append(store)
       _events = append(store)
 
-      assert :ok = catch_up([FromOriginReactor], store)
+      assert [] = catch_up([FromOriginReactor], store)
 
       assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
       assert_received {:got, "from-origin", %CountEvent{count: 2}, _}
+    end
+
+    test "starts a declared reactor exactly where it asked, once" do
+      store = inbox_store()
+      _first = append(store)
+      _second = append(store)
+
+      assert [] = catch_up([FromPositionReactor], store)
+
+      assert Store.checkpoint(store, "from-position") == 2
+      assert_received {:got, "from-position", %CountEvent{count: 2}, _}
+      refute_received {:got, "from-position", %CountEvent{count: 1}, _}
     end
 
     test "is a no-op for a reactor that is already up to date" do
       store = inbox_store()
       events = append(store)
 
-      assert :ok = hand_off([FromOriginReactor], store, events)
+      assert [] = drive([FromOriginReactor], store, events)
       assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
 
-      assert :ok = catch_up([FromOriginReactor], store)
+      assert [] = catch_up([FromOriginReactor], store)
 
       refute_received {:got, "from-origin", _, _}
     end
 
-    test "resumes a :head reactor from its checkpoint once a dispatch has run it" do
+    test "resumes a reactor started by a dispatch from the checkpoint that dispatch gave it" do
       store = inbox_store()
       events = append(store)
 
-      assert :ok = hand_off([CountsReactor], store, events)
+      assert [] = drive([CountsReactor], store, events)
       assert_received {:got, "counts", %CountEvent{count: 1}, _}
 
       _out_of_band = append(store)
 
-      assert :ok = catch_up([CountsReactor], store)
+      assert [] = catch_up([CountsReactor], store)
 
       assert_received {:got, "counts", %CountEvent{count: 2}, _}
     end
 
-    test "skips a checkpoint-less :head reactor, which has nothing to catch up on yet" do
+    test "skips a reactor no dispatch has ever started, having no position to invent" do
       store = inbox_store()
       _events = append(store)
 
-      assert :ok = catch_up([CountsReactor], store, {RecordingEngine, result: :ok})
+      assert [] = catch_up([CountsReactor], store, %{engine: NothingScheduledEngine})
 
-      refute_received {:engine_run, _reactor_run, _store, _opts}
+      refute_received {:offered, _runs}
       assert nil == Store.checkpoint(store, "counts")
     end
 
-    test "collects failures into an error value rather than raising" do
+    test "collects the failures of the runs it executed" do
       store = inbox_store()
       _events = append(store)
 
-      assert {:error,
-              %ReactorError{
-                failures: [%{name: "boom-from-origin", position: position, reason: :kaboom}]
-              }} = catch_up([BoomFromOriginReactor, FromOriginReactor], store)
+      assert [%{name: "boom-from-origin", position: position, reason: :kaboom}] =
+               catch_up([BoomFromOriginReactor, FromOriginReactor], store)
 
       assert is_integer(position)
       assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
     end
 
-    test "hands the engine one run per reactor, carrying the metadata and nesting it is given" do
+    test "offers its runs to the engine like a dispatch does, metadata and all" do
       store = Store.InMemory.init()
       _events = append(store)
 
-      assert :ok =
-               catch_up(
-                 [FromOriginReactor],
-                 store,
-                 {RecordingEngine, result: :ok, foo: :bar},
-                 %{metadata: %{"tenant_id" => "acme"}, nested: true}
-               )
+      assert [] =
+               catch_up([FromOriginReactor], store, %{
+                 engine: {SchedulingEngine, foo: :bar},
+                 metadata: %{"tenant_id" => "acme"}
+               })
 
-      assert_received {:engine_run, reactor_run, ^store, opts}
+      assert_received {:scheduled, runs, ^store, opts}
 
-      assert %ReactorRun{
-               reactor: FromOriginReactor,
-               start_after_position: 0,
-               metadata: %{"tenant_id" => "acme"},
-               nested: true
-             } = reactor_run
-
-      assert opts == [result: :ok, foo: :bar]
+      assert [%ReactorRun{reactor: FromOriginReactor, metadata: %{"tenant_id" => "acme"}}] = runs
+      assert opts == [foo: :bar]
     end
 
     test "delivers each event exactly once when a hand-off and catch-ups race the same reactor" do
@@ -384,7 +685,7 @@ defmodule Ariadne.Flow.HandoffTest do
       events = Enum.flat_map(1..total, fn _ -> append(store) end)
 
       drivers = [
-        fn -> hand_off([FromOriginReactor], store, events) end,
+        fn -> drive([FromOriginReactor], store, events) end,
         fn -> catch_up([FromOriginReactor], store) end,
         fn -> catch_up([FromOriginReactor], store) end
       ]
@@ -394,7 +695,7 @@ defmodule Ariadne.Flow.HandoffTest do
         |> Enum.map(&Task.async/1)
         |> Task.await_many()
 
-      assert Enum.all?(results, &(&1 == :ok))
+      assert Enum.all?(results, &(&1 == []))
 
       Enum.each(1..total, fn count ->
         assert_receive {:got, "from-origin", %CountEvent{count: ^count}, _}
@@ -402,180 +703,6 @@ defmodule Ariadne.Flow.HandoffTest do
 
       refute_receive {:got, "from-origin", _, _}
       assert total == Store.checkpoint(store, "from-origin")
-    end
-  end
-
-  describe "hand_off/3 continues past a failure" do
-    test "runs the reactors after a failing one, in declaration order" do
-      store = inbox_store()
-      events = append(store)
-
-      assert {:error, %ReactorError{failures: [%{name: "boom"}]}} =
-               hand_off(
-                 [BoomReactor, AlphaReactor, BetaReactor],
-                 store,
-                 events
-               )
-
-      assert_received {:got, "alpha", _, _}
-      assert_received {:got, "beta", _, _}
-    end
-
-    test "collects every failure of the pass into one error, in declaration order" do
-      store = inbox_store()
-      events = append(store)
-
-      assert {:error, %ReactorError{failures: failures}} =
-               hand_off(
-                 [BoomReactor, AlphaReactor, BoomSyncReactor],
-                 store,
-                 events
-               )
-
-      assert [%{name: "boom", reason: :kaboom}, %{name: "boom-sync", reason: :kaboom}] = failures
-      assert_received {:got, "alpha", _, _}
-    end
-
-    test "reports a reactor failure with its name, position and reason" do
-      store = inbox_store()
-      events = append(store)
-
-      assert {:error,
-              %ReactorError{failures: [%{name: "boom", position: position, reason: :kaboom}]}} =
-               hand_off([BoomReactor], store, events)
-
-      assert is_integer(position)
-    end
-  end
-
-  describe "hand_off/3 leaves the sync/async decision to the engine" do
-    test "hands sync and async reactors alike to the engine" do
-      store = inbox_store()
-      events = append(store)
-
-      assert :ok =
-               hand_off(
-                 [SyncReactor, CountsReactor],
-                 store,
-                 events,
-                 {RecordingEngine, result: :ok}
-               )
-
-      assert_received {:engine_run, %ReactorRun{reactor: SyncReactor}, _, _}
-      assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, _, _}
-      refute_received {:got, "sync", _, _}
-    end
-
-    test "a sync reactor's failure fails the pass under an engine that would defer it" do
-      store = inbox_store()
-      events = append(store)
-
-      assert {:error, %ReactorError{failures: [%{name: "boom-sync", reason: :kaboom}]}} =
-               hand_off(
-                 [BoomSyncReactor, CountsReactor],
-                 store,
-                 events,
-                 DeferringEngine
-               )
-    end
-
-    test "still defers the async reactors declared after a failing sync one" do
-      store = inbox_store()
-      events = append(store)
-
-      assert {:error, %ReactorError{}} =
-               hand_off(
-                 [BoomSyncReactor, CountsReactor],
-                 store,
-                 events,
-                 DeferringEngine
-               )
-
-      assert_received {:deferred, %ReactorRun{reactor: CountsReactor}}
-    end
-  end
-
-  describe "hand_off/3 engine contract" do
-    test "accepts a bare engine module, normalizing it to a {module, opts} pair" do
-      store = Store.InMemory.init()
-      events = append(store)
-
-      assert :ok = hand_off([CountsReactor], store, events, RecordingEngine)
-
-      assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, ^store, []}
-    end
-
-    test "hands the engine one run on the store per reactor plus its configured opts" do
-      store = Store.InMemory.init()
-      events = append(store)
-
-      assert :ok =
-               hand_off(
-                 [CountsReactor],
-                 store,
-                 events,
-                 {RecordingEngine, result: :ok, foo: :bar}
-               )
-
-      assert_received {:engine_run, reactor_run, ^store, opts}
-      assert %ReactorRun{reactor: CountsReactor, start_after_position: 0} = reactor_run
-      assert opts == [result: :ok, foo: :bar]
-    end
-
-    test "puts the metadata on the run handed to the engine" do
-      store = Store.InMemory.init()
-      events = append(store)
-
-      assert :ok =
-               hand_off(
-                 [CountsReactor],
-                 store,
-                 events,
-                 {RecordingEngine, result: :ok},
-                 %{metadata: %{"tenant_id" => "acme", "trace_id" => "abc123"}}
-               )
-
-      assert_received {:engine_run,
-                       %ReactorRun{metadata: %{"tenant_id" => "acme", "trace_id" => "abc123"}},
-                       _store, _opts}
-    end
-
-    test "an engine that returns :ok without running the reactor does not fail the pass" do
-      store = inbox_store()
-      events = append(store)
-
-      assert :ok =
-               hand_off(
-                 [CountsReactor],
-                 store,
-                 events,
-                 {RecordingEngine, result: :ok}
-               )
-
-      assert_received {:engine_run, _payload, _store, _opts}
-      refute_received {:got, "counts", _, _}
-    end
-
-    test "an engine error fails the pass as a typed reactor failure, one per failing run" do
-      store = Store.InMemory.init()
-      events = append(store)
-
-      assert {:error,
-              %ReactorError{
-                failures: [
-                  %{name: "counts", position: nil, reason: :engine_boom},
-                  %{name: "alpha", position: nil, reason: :engine_boom}
-                ]
-              }} =
-               hand_off(
-                 [CountsReactor, AlphaReactor],
-                 store,
-                 events,
-                 {RecordingEngine, result: {:error, :engine_boom}}
-               )
-
-      assert_received {:engine_run, %ReactorRun{reactor: CountsReactor}, _, _}
-      assert_received {:engine_run, %ReactorRun{reactor: AlphaReactor}, _, _}
     end
   end
 end
