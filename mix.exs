@@ -1,9 +1,9 @@
-defmodule Flow.MixProject do
+defmodule AriadneFlow.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :flow,
+      app: :ariadne_flow,
       version: "0.6.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,

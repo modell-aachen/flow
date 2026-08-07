@@ -1,6 +1,6 @@
 import Config
 
-config :flow, Ariadne.Flow.Test.Repo,
+config :ariadne_flow, Ariadne.Flow.Test.Repo,
   username: System.get_env("POSTGRESQL_USER", "postgres"),
   password: System.get_env("POSTGRESQL_PASSWORD", "postgres"),
   hostname: System.get_env("POSTGRESQL_HOST", "localhost"),
@@ -13,7 +13,7 @@ config :flow, Ariadne.Flow.Test.Repo,
   log: false,
   priv: "priv/flow_test_repo"
 
-config :flow, Ariadne.Flow.Store.Speedrun.Repo,
+config :ariadne_flow, Ariadne.Flow.Store.Speedrun.Repo,
   username: System.get_env("POSTGRESQL_USER", "postgres"),
   password: System.get_env("POSTGRESQL_PASSWORD", "postgres"),
   hostname: System.get_env("POSTGRESQL_HOST", "localhost"),
@@ -26,7 +26,7 @@ config :flow, Ariadne.Flow.Store.Speedrun.Repo,
   ownership_timeout: 300_000,
   priv: "priv/speedrun_repo"
 
-config :flow, ecto_repos: [Ariadne.Flow.Test.Repo]
+config :ariadne_flow, ecto_repos: [Ariadne.Flow.Test.Repo]
 
 config :logger, level: :warning
 
