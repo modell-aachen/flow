@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.7.0](https://github.com/modell-aachen/flow/compare/v0.6.0...v0.7.0) (2026-08-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* `Store.Postgres.Migration.run/1` is replaced by `up/1` and `down/1`, which take a keyword list instead of a positional prefix. Rewrite the existing store migration in place:
+* split dev tooling into dev/ ([#31](https://github.com/modell-aachen/flow/issues/31))
+* rename the OTP app to :ariadne_flow ([#29](https://github.com/modell-aachen/flow/issues/29))
+* the event envelope is a struct ([#27](https://github.com/modell-aachen/flow/issues/27))
+
+### Features
+
+* rename the OTP app to :ariadne_flow ([#29](https://github.com/modell-aachen/flow/issues/29)) ([95d4e32](https://github.com/modell-aachen/flow/commit/95d4e32e0fa2ecb1ca785f4ded343135b26284f7))
+* split dev tooling into dev/ ([#31](https://github.com/modell-aachen/flow/issues/31)) ([622e249](https://github.com/modell-aachen/flow/commit/622e2491db27999ac36abd24dc23b2bf18481b67))
+* the event envelope is a struct ([#27](https://github.com/modell-aachen/flow/issues/27)) ([8e329b7](https://github.com/modell-aachen/flow/commit/8e329b756a6ea4139fa8ce8f1371750dafeb924c))
+* versioned store migrations ([#32](https://github.com/modell-aachen/flow/issues/32)) ([d4bed65](https://github.com/modell-aachen/flow/commit/d4bed65e06aca0776131f8a19a128f379677c2b3))
+
+
+### Bug Fixes
+
+* scope credo to dev/test, add Hex metadata ([#30](https://github.com/modell-aachen/flow/issues/30)) ([0b929f5](https://github.com/modell-aachen/flow/commit/0b929f52da1dffbe48727448e3fbf228a3027772))
+
 ## [0.6.0](https://github.com/modell-aachen/flow/compare/v0.5.1...v0.6.0) (2026-08-07)
 
 
