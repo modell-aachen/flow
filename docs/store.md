@@ -6,21 +6,34 @@ An event store is where all events live. `Ariadne.Flow.Application` uses a store
 
 ### Creating the tables
 
-`Ariadne.Flow.Store.Postgres.Migration.run/1` defines the tables the Postgres store needs. Call it from a regular Ecto migration with the PostgreSQL schema prefix you want the tables to live in:
+`Ariadne.Flow.Store.Postgres.Migration` defines the tables the Postgres store needs. Call it from a regular Ecto migration with the PostgreSQL schema prefix you want the tables to live in:
 
 ```elixir
 defmodule MyApp.Repo.Migrations.AddFlowStore do
   use Ecto.Migration
 
-  def change, do: Ariadne.Flow.Store.Postgres.Migration.run("public")
+  def up, do: Ariadne.Flow.Store.Postgres.Migration.up(prefix: "public")
+
+  def down, do: Ariadne.Flow.Store.Postgres.Migration.down(prefix: "public")
 end
 ```
+
+`up/1` and `down/1` take a keyword list:
+
+- `:prefix` (default `"public"`) — the PostgreSQL schema the tables live in. Must match the prefix passed to `init/1`.
+- `:version` — the schema version to migrate to. `up/1` defaults to the newest version the library knows, `down/1` to the oldest, so the pair above installs the whole store and removes it again.
 
 The tables are named `modac_flow_store`, `modac_flow_store_tags` and
 `modac_flow_store_reactor_checkpoints` — they predate the rename to `Ariadne.Flow`
 and keep their names because they are live production schema.
 
-Running the migration more than once is safe. The default `change/0` direction handles both forward and rollback.
+### Upgrading the schema
+
+The store schema is versioned, and a release that changes it says so in the CHANGELOG. Upgrading is a new migration that calls `up/1` again: it applies every version between the one the store is on and the one you ask for, and does nothing at all when there is none to apply. Pin `version:` to stay on an older schema than the library offers, and roll a version back with `down(version: n)`, which undoes everything from the installed version down to `n` inclusive.
+
+The installed version is recorded in the store itself, as a comment on the `modac_flow_store` table, and `Ariadne.Flow.Store.Postgres.Migration.migrated_version/1` reads it back — inside a migration, like the rest of the API. A store created before the versioning existed reports version `0`; the first `up/1` after upgrading adopts it as version 1 rather than recreating anything, so there is nothing to do by hand.
+
+Running a migration more than once is safe in either direction. `change/0` is not: the versioning has to know which way it is going, so a store migration needs the explicit `up/0` and `down/0` pair.
 
 ### Initializing a store
 
