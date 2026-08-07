@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/modell-aachen/flow/compare/v0.5.1...v0.6.0) (2026-08-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* engines schedule, Flow executes ([#25](https://github.com/modell-aachen/flow/issues/25))
+
+### Features
+
+* engines schedule, Flow executes ([#25](https://github.com/modell-aachen/flow/issues/25)) ([62d4868](https://github.com/modell-aachen/flow/commit/62d4868cefe8c903efdaa3a8f419e6decaf9656b))
+
 ## [0.5.1](https://github.com/modell-aachen/flow/compare/v0.5.0...v0.5.1) (2026-08-05)
 
 
