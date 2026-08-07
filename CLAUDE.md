@@ -48,7 +48,7 @@ Commit subjects must be Conventional Commits — work lands directly on `main`, 
 
 - **Tests live beside their source in `lib/`**, not in `test/`: `test_paths: ["./lib"]`, `test_pattern: "*_test.ex*"`, helper at `lib/test_helper.exs`. Name every test file `_test.exs` — a `.ex` one is compiled into the app but never collected by `mix test`, so its cases silently never run.
 - **Avoid comments as much as possible.** Structure and names carry the explanation — extract a function instead of annotating a block. A comment is a last resort for a constraint the code cannot express, and it stays short.
-- Directory `lib/flow/` maps to the `Ariadne.Flow` namespace — `lib/flow/store/postgres.ex` is `Ariadne.Flow.Store.Postgres`. The OTP app is `:flow`.
+- Directory `lib/flow/` maps to the `Ariadne.Flow` namespace — `lib/flow/store/postgres.ex` is `Ariadne.Flow.Store.Postgres`. The OTP app is `:ariadne_flow` (`:flow` is Dashbit's Flow — the Hex name and the OTP app name both collide, and two apps named `:flow` cannot coexist in one BEAM).
 - Credo runs `--strict` with many opt-in checks: `SinglePipe`, `PipeChainStart`, `BlockPipe`, `StrictModuleLayout`, one alias per line, `AliasUsage` above 3 levels of nesting, no `IO.puts`/`IO.inspect` (the `.exs` scripts opt out per file). `Readability.ModuleDoc` is off because of the moduledoc policy below.
 - **Every module is `@moduledoc false` until 1.0.** Module docs will be written for the public interfaces only once the API is stable enough for a 1.0 release — until then, do not add `@moduledoc` strings; the guides in `docs/` are the documentation.
 
