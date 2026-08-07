@@ -4,7 +4,7 @@ defmodule Flow.MixProject do
   def project do
     [
       app: :flow,
-      version: "0.5.1",
+      version: "0.6.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
