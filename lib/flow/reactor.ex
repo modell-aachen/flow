@@ -1,4 +1,5 @@
 defmodule Ariadne.Flow.Reactor do
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Query
 
   @enforce_keys [:name, :filter, :handler]
@@ -23,7 +24,7 @@ defmodule Ariadne.Flow.Reactor do
 
   def handle(
         %__MODULE__{handler: handler} = reactor,
-        %{event: event, metadata: metadata} = envelope
+        %Envelope{event: event, metadata: metadata} = envelope
       ) do
     if matches?(reactor, envelope), do: handler.(event, metadata), else: :ok
   end
@@ -32,7 +33,8 @@ defmodule Ariadne.Flow.Reactor do
   # envelope carries are what the filter matches on, so an event can be tested against a
   # reactor without going back to the store — which is how a caller works out which of a
   # dispatch's events a reactor is ever going to process.
-  def matches?(%__MODULE__{filter: filter}, envelope), do: Query.Item.matches?(filter, envelope)
+  def matches?(%__MODULE__{filter: filter}, %Envelope{} = envelope),
+    do: Query.Item.matches?(filter, envelope)
 
   defp new_start_after_position(:head), do: :head
 

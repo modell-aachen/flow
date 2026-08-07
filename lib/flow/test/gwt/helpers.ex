@@ -1,6 +1,7 @@
 defmodule Ariadne.Flow.Test.Gwt.Helpers do
   import ExUnit.Assertions
 
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Reactor
   alias Ariadne.Flow.Store.Event.Encoder
   alias Ariadne.Flow.Store.Event.Type
@@ -22,7 +23,7 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
       |> Jason.encode!()
       |> Jason.decode!()
 
-    %{
+    %Envelope{
       event: Encoder.decode(event, store_data, %{}),
       metadata: metadata,
       type: Type.of(type),

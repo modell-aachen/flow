@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.Projection do
   @behaviour Ariadne.Flow.EventReducer
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Query
   @enforce_keys [:state, :filter, :handler]
   defstruct @enforce_keys
@@ -16,7 +17,7 @@ defmodule Ariadne.Flow.Projection do
     |> Enum.reduce(state, &build_state(&1, &2, handler))
   end
 
-  defp build_state(%{event: event, metadata: metadata}, state, handler) do
+  defp build_state(%Envelope{event: event, metadata: metadata}, state, handler) do
     handler.(state, event, metadata)
   end
 

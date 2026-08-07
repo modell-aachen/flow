@@ -1,8 +1,9 @@
 defmodule Ariadne.Flow.EventReducer do
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Event.Codec
 
-  @callback reduce(reducer :: struct(), events :: list()) :: any()
+  @callback reduce(reducer :: struct(), events :: [Envelope.t()]) :: any()
 
   @callback query(reducer :: struct()) :: list()
 

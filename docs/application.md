@@ -63,9 +63,11 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
 {:ok,
  %{
    events: [
-     %{
+     %Ariadne.Flow.Envelope{
        event: %StudentSubscribedToCourse{course_id: 42, student_id: 7},
-       metadata: %{created_at: ~U[2026-04-24 10:15:00Z]}
+       metadata: %{created_at: ~U[2026-04-24 10:15:00Z]},
+       type: "student-subscribed-to-course",
+       tags: ["student:7", "course:42"]
      }
    ]
  }}
@@ -76,7 +78,7 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
 
 `dispatch/3` returns one of three shapes:
 
-- `{:ok, %{events: entries}}` — the command emitted events and they were appended. `entries` is a list with one map per appended event, each carrying:
+- `{:ok, %{events: entries}}` — the command emitted events and they were appended. `entries` is a list with one `Ariadne.Flow.Envelope` per appended event, each carrying:
   - `:event` — the event struct the command emitted.
   - `:metadata` — the metadata stored with the event, including the default `:created_at`.
   - `:type` and `:tags` — the stored form of the event, as `Ariadne.Flow.Store.Event.Encoder` wrote it.

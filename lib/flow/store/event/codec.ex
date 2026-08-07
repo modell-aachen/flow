@@ -1,4 +1,5 @@
 defmodule Ariadne.Flow.Store.Event.Codec do
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Store.Event.Encoder
   alias Ariadne.Flow.Store.Event.Type
   alias Ariadne.Flow.Store.SequencedEvent
@@ -20,6 +21,11 @@ defmodule Ariadne.Flow.Store.Event.Codec do
       |> Map.put(:created_at, created_at)
       |> Map.put(:position, position)
 
-    %{event: reconstructed_event, metadata: enriched_metadata, type: event.type, tags: event.tags}
+    %Envelope{
+      event: reconstructed_event,
+      metadata: enriched_metadata,
+      type: event.type,
+      tags: event.tags
+    }
   end
 end

@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.ReactorTest do
   use Ariadne.Flow.Test.Gwt, async: true
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Reactor
 
@@ -55,6 +56,23 @@ defmodule Ariadne.Flow.ReactorTest do
       when: echo_reactor(),
       then: :zero_not_allowed
     )
+  end
+
+  test "given/1 builds the Envelope a stored event is deserialized into" do
+    assert %Envelope{
+             event: %ExampleEvent{id: 1},
+             type: "Ariadne.Flow.ReactorTest.ExampleEvent",
+             tags: ["thing:1"],
+             metadata: %{created_at: ~U[2000-01-01 12:00:00Z]}
+           } = envelope(%ExampleEvent{id: 1})
+  end
+
+  test "handle/2 only accepts an Envelope, not a bare map of the same shape" do
+    reactor = build_reactor(fn _, _ -> :ok end)
+
+    assert_raise FunctionClauseError, fn ->
+      handle(reactor, Map.from_struct(envelope(%ExampleEvent{id: 1})))
+    end
   end
 
   test "handle/2 returns the user function's result" do
@@ -166,6 +184,11 @@ defmodule Ariadne.Flow.ReactorTest do
   defp new(params, handler) do
     args = [params, handler]
     apply(Reactor, :new, args)
+  end
+
+  defp handle(reactor, envelope) do
+    args = [reactor, envelope]
+    apply(Reactor, :handle, args)
   end
 
   defp start_after(position) do

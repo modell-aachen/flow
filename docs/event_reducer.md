@@ -166,11 +166,11 @@ Child reducers can themselves be composites, so you can stack them to any depth.
 Both `Ariadne.Flow.Projection` and `Ariadne.Flow.Composite` implement the `Ariadne.Flow.EventReducer` behaviour:
 
 ```elixir
-@callback reduce(reducer :: struct(), events :: list()) :: any()
+@callback reduce(reducer :: struct(), events :: [Ariadne.Flow.Envelope.t()]) :: any()
 @callback query(reducer :: struct()) :: list()
 ```
 
-- `reduce/2` folds a list of events into the reducer's result.
+- `reduce/2` folds a list of events into the reducer's result. Each event arrives as an `Ariadne.Flow.Envelope` — the decoded struct and its metadata, plus the `type` and `tags` it is stored under, which is what the reducer's filter matches on.
 - `query/1` returns a list of query items describing which events the reducer needs. For a projection this is just its filter; for a composite it is the union of its children's queries. `Ariadne.Flow.Store.read/3` normalises it once, and the read it returns is what both the result and the append condition of a dispatch are built from.
 
 This shared behaviour is what lets the rest of `Ariadne.Flow` treat projections and composites uniformly.
