@@ -1,12 +1,22 @@
 defmodule AriadneFlow.MixProject do
   use Mix.Project
 
+  @source_url "https://github.com/modell-aachen/flow"
+
+  @description "Event sourcing for Elixir built on Dynamic Consistency Boundaries: an " <>
+                 "append-only event store, event reducers that fold events into values, " <>
+                 "and command dispatch with reactors."
+
   def project do
     [
       app: :ariadne_flow,
       version: "0.6.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      name: "Ariadne Flow",
+      description: @description,
+      source_url: @source_url,
+      package: package(),
       aliases: aliases(),
       deps: deps(),
       docs: [
@@ -33,13 +43,31 @@ defmodule AriadneFlow.MixProject do
     [extra_applications: [:crypto, :logger]]
   end
 
+  defp package do
+    [
+      files: ~w(lib mix.exs .formatter.exs README.md CHANGELOG.md LICENSE),
+      exclude_patterns: [
+        ~r/_test\.exs$/,
+        ~r{^lib/test_helper\.exs$},
+        ~r{^lib/flow/examples},
+        ~r{^lib/flow/test/repo\.ex$},
+        ~r{speedrun},
+        ~r{^lib/flow/store/postgres/consistency_run}
+      ],
+      links: %{
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+      }
+    ]
+  end
+
   defp deps do
     [
-      {:credo, "~> 1.6"},
       {:ecto_sql, "~> 3.10"},
       {:jason, "~> 1.4"},
       {:postgrex, ">= 0.0.0"},
       {:telemetry, "~> 1.0"},
+      {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:mix_test_interactive, "~> 5.0", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false}
