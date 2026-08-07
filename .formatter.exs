@@ -1,4 +1,4 @@
 [
   import_deps: [:ecto],
-  inputs: ["{mix,.formatter}.exs", "{config,lib}/**/*.{ex,exs}"]
+  inputs: ["{mix,.formatter}.exs", "{config,dev,lib}/**/*.{ex,exs}"]
 ]

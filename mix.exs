@@ -12,6 +12,7 @@ defmodule AriadneFlow.MixProject do
       app: :ariadne_flow,
       version: "0.6.0",
       elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       name: "Ariadne Flow",
       description: @description,
@@ -33,7 +34,7 @@ defmodule AriadneFlow.MixProject do
         filter_modules: ~r/^Elixir\.Ariadne\.Flow\.(?!Examples)/,
         nest_modules_by_prefix: [Ariadne.Flow]
       ],
-      test_paths: ["./lib"],
+      test_paths: ["./lib", "./dev"],
       test_pattern: "*_test.ex*",
       consolidate_protocols: Mix.env() != :test
     ]
@@ -43,16 +44,15 @@ defmodule AriadneFlow.MixProject do
     [extra_applications: [:crypto, :logger]]
   end
 
+  defp elixirc_paths(:prod), do: ["lib"]
+  defp elixirc_paths(_env), do: ["lib", "dev"]
+
   defp package do
     [
       files: ~w(lib mix.exs .formatter.exs README.md CHANGELOG.md LICENSE),
       exclude_patterns: [
         ~r/_test\.exs$/,
-        ~r{^lib/test_helper\.exs$},
-        ~r{^lib/flow/examples},
-        ~r{^lib/flow/test/repo\.ex$},
-        ~r{speedrun},
-        ~r{^lib/flow/store/postgres/consistency_run}
+        ~r{^lib/test_helper\.exs$}
       ],
       links: %{
         "GitHub" => @source_url,
@@ -82,8 +82,8 @@ defmodule AriadneFlow.MixProject do
         "ecto.migrate -r Ariadne.Flow.Test.Repo",
         "test --warnings-as-errors"
       ],
-      speedrun: speedrun_repo_setup() ++ ["run lib/flow/store/speedrun_cli.exs"],
-      consistency: speedrun_repo_setup() ++ ["run lib/flow/store/postgres/consistency_run.exs"],
+      speedrun: speedrun_repo_setup() ++ ["run dev/flow/store/speedrun_cli.exs"],
+      consistency: speedrun_repo_setup() ++ ["run dev/flow/store/postgres/consistency_run.exs"],
       check: [
         "credo --strict",
         "format --check-formatted",

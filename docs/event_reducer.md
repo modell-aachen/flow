@@ -127,7 +127,7 @@ def course_capacity(course_id) do
 end
 ```
 
-The filter still matches what it matched before, but of all the events it matches only the last one reaches the handler — one event in total, not one per listed type. Here that is the newest of the `CourseDefined` and `CourseCapacityChanged` events together, which is exactly what a current capacity is. The superseded capacity changes never leave the store. This is the form the course example in `lib/flow/examples/` ships.
+The filter still matches what it matched before, but of all the events it matches only the last one reaches the handler — one event in total, not one per listed type. Here that is the newest of the `CourseDefined` and `CourseCapacityChanged` events together, which is exactly what a current capacity is. The superseded capacity changes never leave the store. This is the form the course example in `dev/flow/examples/` ships.
 
 What the option saves for certain is rows fetched and reduced, not necessarily rows scanned. The Postgres store puts the selection inside the item's own query as an `ORDER BY position DESC LIMIT 1`, which for a filter without `tags` is a backward walk of the position index that stops at the first hit. A tag-restricted filter joins the tag table and aggregates per position to enforce its AND-semantics, so whether the database can stop at the first group is the query planner's decision rather than a guarantee.
 
