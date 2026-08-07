@@ -6,6 +6,7 @@
       name: "default",
       files: %{
         included: [
+          "dev/",
           "lib/",
           "src/",
           "test/",
