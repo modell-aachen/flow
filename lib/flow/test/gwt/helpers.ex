@@ -6,16 +6,22 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
   alias Ariadne.Flow.Store.Event.Encoder
   alias Ariadne.Flow.Store.Event.Type
 
+  @default_created_at ~U[2000-01-01 12:00:00Z]
+
   def given(events) do
-    Enum.map(events, fn
-      %{event: event, metadata: metadata} -> envelope(event, metadata)
-      event -> envelope(event, %{created_at: ~U[2000-01-01 12:00:00Z]})
+    events
+    |> Enum.with_index(1)
+    |> Enum.map(fn
+      {%Envelope{} = envelope, _position} -> envelope
+      {%{event: event, metadata: metadata}, position} -> envelope(event, metadata, position)
+      {event, position} -> envelope(event, %{created_at: @default_created_at}, position)
     end)
   end
 
   # The same envelope `Codec.deserialize/1` yields for a stored event: the struct after
-  # a JSON round-trip, plus the stored type and tags that filters match against.
-  defp envelope(%type{} = event, metadata) do
+  # a JSON round-trip, plus the stored type and tags that filters match against, and the
+  # position the store would have assigned — the given order standing in for the log.
+  defp envelope(%type{} = event, metadata, position) do
     %{data: data, tags: tags} = Encoder.encode(event)
 
     store_data =
@@ -25,7 +31,7 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
 
     %Envelope{
       event: Encoder.decode(event, store_data, %{}),
-      metadata: metadata,
+      metadata: Map.put_new(metadata, :position, position),
       type: Type.of(type),
       tags: tags
     }
