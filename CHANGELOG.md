@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.0](https://github.com/modell-aachen/flow/compare/v0.7.0...v0.8.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename misleading public names ([#35](https://github.com/modell-aachen/flow/issues/35))
+* raise ArgumentError on bad construction ([#33](https://github.com/modell-aachen/flow/issues/33))
+
+### Features
+
+* rename misleading public names ([#35](https://github.com/modell-aachen/flow/issues/35)) ([16201bc](https://github.com/modell-aachen/flow/commit/16201bcb0e542beea3ae2f6dbf5451f1697d7482))
+
+
+### Refactors
+
+* raise ArgumentError on bad construction ([#33](https://github.com/modell-aachen/flow/issues/33)) ([c2bbec6](https://github.com/modell-aachen/flow/commit/c2bbec6eb6c7bb7ca077375a1f1e71e10040de5d))
+
 ## [0.7.0](https://github.com/modell-aachen/flow/compare/v0.6.0...v0.7.0) (2026-08-07)
 
 
