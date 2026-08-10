@@ -11,11 +11,11 @@ defmodule Ariadne.Flow.Store.StoredEventReactorTest do
   end
 
   test "new/1 rejects a query asking for only the last event" do
-    assert_raise RuntimeError, ~r/only_last_event/, fn ->
+    assert_raise ArgumentError, ~r/only_last_event/, fn ->
       new(%{query: [%{types: ["ItemAdded"], only_last_event: true}]})
     end
 
-    assert_raise RuntimeError, ~r/only_last_event/, fn ->
+    assert_raise ArgumentError, ~r/only_last_event/, fn ->
       new(%{
         query: [
           %{types: ["ItemAdded"]},

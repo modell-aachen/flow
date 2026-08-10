@@ -14,7 +14,7 @@ defmodule Ariadne.Flow.Store.AppendCondition do
     %__MODULE__{fail_if_events_match: Query.new(query), after: after_condition}
   end
 
-  def new(_), do: raise(@append_condition_hint)
+  def new(_), do: raise(ArgumentError, @append_condition_hint)
 
   @doc "Conflicts on everything the read's own query matches after the last position it saw."
   def for_read(%Read{query: query, last_position: last_position}) do

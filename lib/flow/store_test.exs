@@ -168,7 +168,7 @@ defmodule Ariadne.Flow.StoreTest do
                ]
              } = Store.read(store, [%{types: ["PageCreated"]}, %{types: ["PageDeleted"]}])
 
-      assert_raise(RuntimeError, fn ->
+      assert_raise(ArgumentError, fn ->
         Store.read(store, [%{types: []}])
       end)
     end
@@ -178,7 +178,7 @@ defmodule Ariadne.Flow.StoreTest do
         %Event{type: "PageCreated", data: %{}, tags: ["page:Page 1", "type:page"]}
       ])
 
-      assert_raise(RuntimeError, fn ->
+      assert_raise(ArgumentError, fn ->
         Store.read(store, [%{tags: ["page:Page 1"]}])
       end)
     end
@@ -374,7 +374,7 @@ defmodule Ariadne.Flow.StoreTest do
                  }
                )
 
-      assert_raise RuntimeError, fn ->
+      assert_raise ArgumentError, fn ->
         Store.append(store, %Event{type: "PageCreated", data: %{}, tags: []},
           condition: %{after: 1}
         )

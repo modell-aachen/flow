@@ -46,7 +46,7 @@ defmodule Ariadne.Flow.Reactor do
 
   defp new_filter(filter) do
     case Query.Item.new(filter) do
-      %Query.Item{only_last_event: true} -> raise(@filter_hint_only_last_event)
+      %Query.Item{only_last_event: true} -> raise(ArgumentError, @filter_hint_only_last_event)
       %Query.Item{} = item -> item
     end
   end
