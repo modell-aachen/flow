@@ -4,8 +4,8 @@ defmodule Ariadne.Flow.Store.Backend do
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.AppendCondition
-  alias Ariadne.Flow.Store.Event
-  alias Ariadne.Flow.Store.SequencedEvent
+  alias Ariadne.Flow.Store.Record
+  alias Ariadne.Flow.Store.SequencedRecord
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @typedoc "Whatever a backend needs to reach its storage. Carried in `t:Ariadne.Flow.Store.t/0`."
@@ -33,7 +33,7 @@ defmodule Ariadne.Flow.Store.Backend do
         ]
 
   @typedoc "What a read and a successful append return: the events, in position order."
-  @type read_result :: %{events: [SequencedEvent.t()]}
+  @type read_result :: %{events: [SequencedRecord.t()]}
 
   @typedoc """
   Where a reactor that has no checkpoint yet is to resume from: the name the checkpoint is
@@ -53,8 +53,8 @@ defmodule Ariadne.Flow.Store.Backend do
   @doc """
   Returns the events matching `query`, in ascending position order.
 
-  A query is the union of its items, each item contributing its own matches. An item
-  with `only_last_event: true` contributes one event at most — the highest-positioned
+  A query is the union of its filters, each filter contributing its own matches. A
+  filter with `only_last_event: true` contributes one event at most — the highest-positioned
   one matching it, of those the read covers, so `:after` narrows what "last" means and
   `:limit` cuts the union that selection is part of.
 
@@ -69,7 +69,7 @@ defmodule Ariadne.Flow.Store.Backend do
   either every event lands or none does. `{:error, :append_condition_failed}` means the
   `:condition` no longer held and nothing was written.
   """
-  @callback append(config(), Event.t() | [Event.t()], append_opts()) ::
+  @callback append(config(), Record.t() | [Record.t()], append_opts()) ::
               {:ok, read_result()} | {:error, :append_condition_failed}
 
   @doc """
@@ -157,7 +157,7 @@ defmodule Ariadne.Flow.Store.Backend do
   How far the dumped form travels is the backend's own property, not something this
   contract fixes. `Ariadne.Flow.Store.Postgres` dumps a map of strings and survives
   whatever a job system stores it in; `Ariadne.Flow.Store.InMemory` dumps its agent and
-  loads back only on the node that built it. An engine that hands a store to another
+  loads back only on the node that built it. A scheduler that hands a store to another
   node is the one that needs a backend whose dumped form survives the trip.
   """
   @callback dump(config()) :: term()

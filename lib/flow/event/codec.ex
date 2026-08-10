@@ -1,20 +1,20 @@
-defmodule Ariadne.Flow.Store.Event.Codec do
+defmodule Ariadne.Flow.Event.Codec do
   alias Ariadne.Flow.Envelope
-  alias Ariadne.Flow.Store.Event.Encoder
-  alias Ariadne.Flow.Store.Event.Type
-  alias Ariadne.Flow.Store.SequencedEvent
+  alias Ariadne.Flow.Event
+  alias Ariadne.Flow.Event.Type
+  alias Ariadne.Flow.Store.SequencedRecord
 
-  def deserialize(%SequencedEvent{
-        event: event,
+  def deserialize(%SequencedRecord{
+        record: record,
         metadata: metadata,
         created_at: created_at,
         position: position
       }) do
     reconstructed_event =
-      event.type
+      record.type
       |> Type.module!()
       |> struct()
-      |> Encoder.decode(event.data, metadata)
+      |> Event.decode(record.data, metadata)
 
     enriched_metadata =
       metadata
@@ -24,8 +24,8 @@ defmodule Ariadne.Flow.Store.Event.Codec do
     %Envelope{
       event: reconstructed_event,
       metadata: enriched_metadata,
-      type: event.type,
-      tags: event.tags
+      type: record.type,
+      tags: record.tags
     }
   end
 end

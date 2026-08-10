@@ -1,6 +1,6 @@
 defmodule Ariadne.Flow.Store.Speedrun.Courses do
   alias Ariadne.Flow.Store.AppendCondition
-  alias Ariadne.Flow.Store.Event
+  alias Ariadne.Flow.Store.Record
   alias Ariadne.Flow.Store.Speedrun.ReportingStore, as: Store
   alias Ecto.UUID
 
@@ -43,7 +43,7 @@ defmodule Ariadne.Flow.Store.Speedrun.Courses do
   end
 
   defp define_course(store, course_id) do
-    %{events: []} = read = Store.read(store, [course_exists_query_item(course_id)])
+    %{events: []} = read = Store.read(store, [course_exists_filter(course_id)])
 
     {:ok, _} =
       Store.append(store, course_defined_event(course_id),
@@ -54,11 +54,11 @@ defmodule Ariadne.Flow.Store.Speedrun.Courses do
   defp subscribe_student_to_course(store, student_id, course_id) do
     read =
       Store.read(store, [
-        course_exists_query_item(course_id),
-        course_capacity_query_item(course_id),
-        student_already_subscribed_query_item(student_id, course_id),
-        number_of_course_subscriptions_query_item(course_id),
-        number_of_student_subscription_query_item(student_id)
+        course_exists_filter(course_id),
+        course_capacity_filter(course_id),
+        student_already_subscribed_filter(student_id, course_id),
+        number_of_course_subscriptions_filter(course_id),
+        number_of_student_subscription_filter(student_id)
       ])
 
     {:ok, _} =
@@ -67,31 +67,31 @@ defmodule Ariadne.Flow.Store.Speedrun.Courses do
       )
   end
 
-  defp course_exists_query_item(course_id) do
+  defp course_exists_filter(course_id) do
     %{types: ["CourseDefined"], tags: ["course:#{course_id}"]}
   end
 
-  defp course_capacity_query_item(course_id) do
+  defp course_capacity_filter(course_id) do
     %{types: ["CourseDefined", "CourseCapacityChanged"], tags: ["course:#{course_id}"]}
   end
 
-  defp student_already_subscribed_query_item(student_id, course_id) do
+  defp student_already_subscribed_filter(student_id, course_id) do
     %{
       types: ["StudentSubscribedToCourse"],
       tags: ["student:#{student_id}", "course:#{course_id}"]
     }
   end
 
-  defp number_of_course_subscriptions_query_item(course_id) do
+  defp number_of_course_subscriptions_filter(course_id) do
     %{types: ["StudentSubscribedToCourse"], tags: ["course:#{course_id}"]}
   end
 
-  defp number_of_student_subscription_query_item(student_id) do
+  defp number_of_student_subscription_filter(student_id) do
     %{types: ["StudentSubscribedToCourse"], tags: ["student:#{student_id}"]}
   end
 
   defp course_defined_event(course_id) do
-    %Event{
+    %Record{
       type: "CourseDefined",
       data: %{"course_id" => course_id, "capacity" => 10},
       tags: ["course:#{course_id}"]
@@ -99,7 +99,7 @@ defmodule Ariadne.Flow.Store.Speedrun.Courses do
   end
 
   defp student_subscribed_to_course_event(student_id, course_id) do
-    %Event{
+    %Record{
       type: "StudentSubscribedToCourse",
       data: %{"student_id" => student_id, "course_id" => course_id},
       tags: ["student:#{student_id}", "course:#{course_id}"]

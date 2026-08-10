@@ -4,14 +4,14 @@ defmodule Ariadne.Flow.CompositeTest do
   alias Ariadne.Flow.Projection
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct []
 
     def tags(_), do: []
   end
 
   defmodule ValueEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct [:value]
 
     def tags(_), do: []

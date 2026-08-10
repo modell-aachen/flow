@@ -76,7 +76,7 @@ gwt "subscribe_student" do
 end
 ```
 
-Use `ok` and `err` whenever the reducer returns a tagged tuple — commands are the typical case, since their `map_fn` returns `{:ok, events}` or `{:error, reason}`.
+Use `ok` and `err` whenever the reducer returns a tagged tuple — commands are the typical case, since their `mapper` returns `{:ok, events}` or `{:error, reason}`.
 
 ## Supplying metadata
 

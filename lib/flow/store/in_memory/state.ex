@@ -1,9 +1,10 @@
 defmodule Ariadne.Flow.Store.InMemory.State do
   @moduledoc false
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Query
-  alias Ariadne.Flow.Store.Event
-  alias Ariadne.Flow.Store.SequencedEvent
+  alias Ariadne.Flow.Store.Record
+  alias Ariadne.Flow.Store.SequencedRecord
   alias Ariadne.Flow.Store.StoredEventReactor
 
   defstruct position: 0, events: [], checkpoints: %{}
@@ -45,7 +46,7 @@ defmodule Ariadne.Flow.Store.InMemory.State do
     end
   end
 
-  def append(%__MODULE__{} = state, %Event{} = event, opts), do: append(state, [event], opts)
+  def append(%__MODULE__{} = state, %Record{} = record, opts), do: append(state, [record], opts)
 
   def consume(
         %__MODULE__{} = state,
@@ -101,30 +102,30 @@ defmodule Ariadne.Flow.Store.InMemory.State do
   defp take(list, :infinity), do: list
   defp take(list, n) when is_integer(n), do: Enum.take(list, n)
 
-  defp filter(sequenced_events, %Query{items: :all}) when is_list(sequenced_events),
+  defp filter(sequenced_events, %Query{filters: :all}) when is_list(sequenced_events),
     do: sequenced_events
 
-  defp filter(sequenced_events, %Query{items: items}) when is_list(sequenced_events) do
-    items
+  defp filter(sequenced_events, %Query{filters: filters}) when is_list(sequenced_events) do
+    filters
     |> Enum.flat_map(&select(sequenced_events, &1))
     |> Enum.uniq_by(& &1.position)
     |> Enum.sort_by(& &1.position)
   end
 
-  defp select(sequenced_events, %Query.Item{} = item) do
+  defp select(sequenced_events, %Filter{} = filter) do
     sequenced_events
-    |> Enum.filter(&Query.Item.matches?(item, &1.event))
-    |> Query.Item.take_last(item)
+    |> Enum.filter(&Filter.matches?(filter, &1.record))
+    |> Filter.take_last(filter)
   end
 
-  defp append_events(state, events, opts) do
+  defp append_events(state, records, opts) do
     created_at = Keyword.get(opts, :created_at, DateTime.utc_now())
     metadata = Keyword.get(opts, :metadata, %{})
 
     {new_state, appended} =
-      Enum.reduce(events, {state, []}, fn %Event{} = event, {acc, appended} ->
-        sequenced = %SequencedEvent{
-          event: event,
+      Enum.reduce(records, {state, []}, fn %Record{} = record, {acc, appended} ->
+        sequenced = %SequencedRecord{
+          record: record,
           position: acc.position + 1,
           created_at: created_at,
           metadata: metadata

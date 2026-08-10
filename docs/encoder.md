@@ -1,13 +1,13 @@
 # Encoder
 
-The encoder describes how an event struct is turned into data for the store and back. Every event opts in via `@derive Ariadne.Flow.Store.Event.Encoder` — without it, the store cannot persist the event.
+The encoder describes how an event struct is turned into data for the store and back. Every event opts in via `@derive Ariadne.Flow.Event` — without it, the store cannot persist the event.
 
 ## Stored type
 
 The encoder is also where an event declares the type it is stored under:
 
 ```elixir
-@derive {Ariadne.Flow.Store.Event.Encoder, type: "course-defined"}
+@derive {Ariadne.Flow.Event, type: "course-defined"}
 ```
 
 The type is the event's identity in the store — filters select on it, and reading an event back resolves it to the module that declares it. It defaults to the module name, so an event without `type:` is stored as `"CourseDefined"`; [evolving events](events.md#renaming-an-event-module) covers why declaring it anyway is what keeps a module free to be renamed.
@@ -43,7 +43,7 @@ A custom encoder is useful when the default does not fit — for example:
 - A field needs a non-default serialisation (a custom value object, a formatted timestamp).
 - A field should be redacted or transformed before storage.
 
-Instead of `@derive`, write a `defimpl` inside the event module and implement `encode/1` and `decode/3` directly. Delegate to `Ariadne.Flow.Store.Event.Encoder.Default` for the parts you do not need to change:
+Instead of `@derive`, write a `defimpl` inside the event module and implement `encode/1` and `decode/3` directly. Delegate to `Ariadne.Flow.Event.DefaultEncoder` for the parts you do not need to change:
 
 ```elixir
 defmodule CourseDefined do
@@ -51,16 +51,16 @@ defmodule CourseDefined do
 
   def tags(e), do: ["course:#{e.course_id}"]
 
-  defimpl Ariadne.Flow.Store.Event.Encoder do
-    alias Ariadne.Flow.Store.Event.Encoder.Default
+  defimpl Ariadne.Flow.Event do
+    alias Ariadne.Flow.Event.DefaultEncoder
 
     def type, do: "course-defined"
 
-    def encode(event), do: Default.encode(event)
+    def encode(event), do: DefaultEncoder.encode(event)
 
     def decode(event, store_data, metadata) do
       store_data = Map.put_new(store_data, "capacity", 0)
-      Default.decode(event, store_data, metadata)
+      DefaultEncoder.decode(event, store_data, metadata)
     end
   end
 end

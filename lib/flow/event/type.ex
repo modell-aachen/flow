@@ -1,11 +1,11 @@
-defmodule Ariadne.Flow.Store.Event.Type do
+defmodule Ariadne.Flow.Event.Type do
   @moduledoc false
-  alias Ariadne.Flow.Store.Event.Encoder
+  alias Ariadne.Flow.Event
 
   @index {__MODULE__, :index}
 
   def of(module) when is_atom(module) do
-    impl = Module.concat(Encoder, module)
+    impl = Module.concat(Event, module)
 
     if declares_type?(impl),
       do: declared!(impl, module),
@@ -70,16 +70,16 @@ defmodule Ariadne.Flow.Store.Event.Type do
   defp event_modules, do: Enum.uniq(compiled_modules() ++ loaded_modules())
 
   defp compiled_modules do
-    case Encoder.__protocol__(:impls) do
+    case Event.__protocol__(:impls) do
       {:consolidated, modules} -> modules
-      :not_consolidated -> Protocol.extract_impls(Encoder, :code.get_path())
+      :not_consolidated -> Protocol.extract_impls(Event, :code.get_path())
     end
   end
 
   defp loaded_modules do
     for {module, _file} <- :code.all_loaded(),
         function_exported?(module, :__impl__, 1),
-        module.__impl__(:protocol) == Encoder,
+        module.__impl__(:protocol) == Event,
         do: module.__impl__(:for)
   end
 
@@ -88,11 +88,11 @@ defmodule Ariadne.Flow.Store.Event.Type do
     No event module declares the stored event type #{inspect(type)}.
 
     Every type in the store has to resolve back to a module implementing \
-    Ariadne.Flow.Store.Event.Encoder — a type that resolves to none is history no \
+    Ariadne.Flow.Event — a type that resolves to none is history no \
     version of the code can read. A renamed event module keeps its history by pinning \
     the type it was stored under:
 
-        @derive {Ariadne.Flow.Store.Event.Encoder, type: #{inspect(type)}}
+        @derive {Ariadne.Flow.Event, type: #{inspect(type)}}
     """
   end
 
@@ -113,7 +113,7 @@ defmodule Ariadne.Flow.Store.Event.Type do
 
     The type is the name the event is stored under:
 
-        @derive {Ariadne.Flow.Store.Event.Encoder, type: "#{from_module_name(module)}"}
+        @derive {Ariadne.Flow.Event, type: "#{from_module_name(module)}"}
     """
   end
 end

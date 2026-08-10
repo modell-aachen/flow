@@ -2,22 +2,22 @@ defmodule Ariadne.Flow.ConsistencyTest do
   use ExUnit.Case, async: true
   alias Ariadne.Flow.Consistency
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Event.Codec
   alias Ariadne.Flow.PostCommitError
   alias Ariadne.Flow.Reactor
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
-  alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.StoredEventReactor
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
   end
 
   defmodule OtherEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct []
 
     def tags(_), do: []
@@ -86,7 +86,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
   end
 
   defp count_store_event(count) do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.ConsistencyTest.CountEvent",
       data: %{"count" => count},
       tags: ["count:#{count}"]
@@ -94,7 +94,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
   end
 
   defp tagged_store_event do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.ConsistencyTest.CountEvent",
       data: %{"count" => 9},
       tags: ["only:me"]
@@ -102,7 +102,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
   end
 
   defp other_store_event do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.ConsistencyTest.OtherEvent",
       data: %{},
       tags: []
@@ -326,7 +326,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
       on_exit(fn -> :telemetry.detach(handler) end)
     end
 
-    # The migration property inline engines rely on: their checkpoint committed with the
+    # The migration property inline schedulers rely on: their checkpoint committed with the
     # events, so the await costs one round of reads and never sleeps.
     test "a reactor already caught up is confirmed in a single poll" do
       {store, events} = store_with_counts(1)

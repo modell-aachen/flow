@@ -5,14 +5,14 @@ defmodule Ariadne.Flow.ReactorRunTest do
   alias Ariadne.Flow.Store
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
   end
 
   defmodule UnrelatedEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct []
 
     def tags(_), do: []
@@ -322,7 +322,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
   end
 
   defp count_store_event(count) do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.ReactorRunTest.CountEvent",
       data: %{"count" => count},
       tags: ["count:#{count}"]
@@ -330,7 +330,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
   end
 
   defp unrelated_store_event do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.ReactorRunTest.UnrelatedEvent",
       data: %{},
       tags: []

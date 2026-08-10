@@ -1,4 +1,4 @@
-defmodule Ariadne.Flow.Store.Event do
+defmodule Ariadne.Flow.Store.Record do
   @enforce_keys [:type, :data, :tags]
   defstruct @enforce_keys
 

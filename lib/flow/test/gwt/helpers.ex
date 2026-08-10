@@ -2,9 +2,9 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
   import ExUnit.Assertions
 
   alias Ariadne.Flow.Envelope
+  alias Ariadne.Flow.Event
+  alias Ariadne.Flow.Event.Type
   alias Ariadne.Flow.Reactor
-  alias Ariadne.Flow.Store.Event.Encoder
-  alias Ariadne.Flow.Store.Event.Type
 
   @default_created_at ~U[2000-01-01 12:00:00Z]
 
@@ -22,7 +22,7 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
   # a JSON round-trip, plus the stored type and tags that filters match against, and the
   # position the store would have assigned — the given order standing in for the log.
   defp envelope(%type{} = event, metadata, position) do
-    %{data: data, tags: tags} = Encoder.encode(event)
+    %{data: data, tags: tags} = Event.encode(event)
 
     store_data =
       data
@@ -30,7 +30,7 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
       |> Jason.decode!()
 
     %Envelope{
-      event: Encoder.decode(event, store_data, %{}),
+      event: Event.decode(event, store_data, %{}),
       metadata: Map.put_new(metadata, :position, position),
       type: Type.of(type),
       tags: tags

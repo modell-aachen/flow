@@ -69,7 +69,7 @@ An error *return* is not a rollback. `{:error, reason}` comes back as it is, wit
 
 The transaction also joins an ambient one — its own `transaction/2`, or, with the Postgres store, any transaction on the same repo — rather than committing independently inside it. `Ariadne.Flow.Store.in_transaction?/1` answers whether there is one to join, which is how a caller finds out whether a write it makes now would still be invisible to everybody else. `Application.dispatch/3` asks it to decide whether a synchronous reactor's run can be [scheduled and waited for](application.html#nesting).
 
-`Application.dispatch/3` wraps every dispatch in `transaction/2`, and what goes inside it is exactly what has to commit with the events: the append itself, the reactor checkpoints the append initialises, and whatever the [engine](application.html#the-engine) durably schedules. Reactors run *after* that transaction commits, so no reactor can undo a dispatch and none of them holds the append lock while it works.
+`Application.dispatch/3` wraps every dispatch in `transaction/2`, and what goes inside it is exactly what has to commit with the events: the append itself, the reactor checkpoints the append initialises, and whatever the [scheduler](application.html#the-scheduler) durably schedules. Reactors run *after* that transaction commits, so no reactor can undo a dispatch and none of them holds the append lock while it works.
 
 ## Backends
 

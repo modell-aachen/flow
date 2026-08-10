@@ -10,14 +10,14 @@ defmodule Ariadne.Flow.CommandHandlerTest do
   @created_at ~U[2025-09-10 11:09:49.647209Z]
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
   end
 
   defmodule RenamedCountEvent do
-    @derive {Ariadne.Flow.Store.Event.Encoder, type: "count-event"}
+    @derive {Ariadne.Flow.Event, type: "count-event"}
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
@@ -166,7 +166,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
       assert %{
                events: [
                  %{
-                   event: %{
+                   record: %{
                      type: "Ariadne.Flow.CommandHandlerTest.CountEvent",
                      data: %{"count" => 1},
                      tags: ["count:1"]
@@ -181,13 +181,13 @@ defmodule Ariadne.Flow.CommandHandlerTest do
 
       {:ok, _} =
         Store.append(store, [
-          %Store.Event{type: "count-event", data: %{"count" => 7}, tags: ["count:7"]}
+          %Store.Record{type: "count-event", data: %{"count" => 7}, tags: ["count:7"]}
         ])
 
       assert {:ok, %{events: [%{event: %RenamedCountEvent{count: 8}}]}} =
                handle(renamed_count_command(), store)
 
-      assert %{events: [_, %{event: %{type: "count-event", data: %{"count" => 8}}}]} =
+      assert %{events: [_, %{record: %{type: "count-event", data: %{"count" => 8}}}]} =
                Store.read(store)
     end
 
@@ -207,8 +207,8 @@ defmodule Ariadne.Flow.CommandHandlerTest do
                events: [
                  _,
                  _,
-                 %{event: %{data: %{"count" => 2}}},
-                 %{event: %{data: %{"count" => 2}}}
+                 %{record: %{data: %{"count" => 2}}},
+                 %{record: %{data: %{"count" => 2}}}
                ]
              } = Store.read(store)
     end
@@ -238,7 +238,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
       assert {:error, %AppendConditionError{}} =
                handle(conflicting_count_command(store), store)
 
-      assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
+      assert %{events: [%{record: %{data: %{"count" => 1}}}]} = Store.read(store)
     end
 
     test "decides from the last matching event when the command's filter asks for it" do
@@ -257,7 +257,7 @@ defmodule Ariadne.Flow.CommandHandlerTest do
       assert {:error, %AppendConditionError{}} =
                handle(conflicting_last_count_command(store), store)
 
-      assert %{events: [%{event: %{data: %{"count" => 1}}}]} = Store.read(store)
+      assert %{events: [%{record: %{data: %{"count" => 1}}}]} = Store.read(store)
     end
 
     test "returns the append error unchanged" do

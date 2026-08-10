@@ -1,4 +1,4 @@
-defmodule Ariadne.Flow.ReactorEngine do
+defmodule Ariadne.Flow.Scheduler do
   @moduledoc false
   @callback schedule(
               reactor_runs :: [%Ariadne.Flow.ReactorRun{}],

@@ -20,7 +20,7 @@ iex> Ariadne.Flow.Application.query(store, has_room?(42))
 true
 ```
 
-`query/2` accepts any event reducer. A projection returns the state it folded; a composite returns whatever its `map_fn` produced.
+`query/2` accepts any event reducer. A projection returns the state it folded; a composite returns whatever its `mapper` produced.
 
 Internally, `query/2` performs three steps:
 
@@ -81,7 +81,7 @@ iex> Ariadne.Flow.Application.dispatch(store, subscribe_student(42, 7))
 - `{:ok, %{events: entries}}` — the command emitted events and they were appended. `entries` is a list with one `Ariadne.Flow.Envelope` per appended event, each carrying:
   - `:event` — the event struct the command emitted.
   - `:metadata` — the metadata stored with the event, including the defaults `:created_at` and `:position`.
-  - `:type` and `:tags` — the stored form of the event, as `Ariadne.Flow.Store.Event.Encoder` wrote it.
+  - `:type` and `:tags` — the stored form of the event, as `Ariadne.Flow.Event` wrote it.
 
   Being a struct rather than a bare map, an entry does not implement `Access` — read a field with `entry.event`, not `entry[:event]` — and is not directly encodable by `Jason`.
 - `{:error, reason}` — the command returned `{:error, reason}`. Nothing is written and the reason is passed back unchanged.
@@ -147,7 +147,7 @@ application =
 
 The `name` is what the checkpoint is keyed on, so it must be stable across versions. The `reactor/0` convention is part of the public contract: the module name is all that identifies a reactor, which lets a reactor run be serialised and handed to a job system.
 
-The `filter` is a query item like a projection's, with one exception: a reactor reacts to every event it matches, so it cannot ask for [`only_last_event`](event_reducer.html#reducing-the-last-event-only) — the events it skipped would be checkpointed past and never delivered. `Reactor.new/2` raises `ArgumentError` on such a filter, as it does on anything else it is constructed wrongly with.
+The `filter` is an `Ariadne.Flow.Filter` like a projection's, with one exception: a reactor reacts to every event it matches, so it cannot ask for [`only_last_event`](event_reducer.html#reducing-the-last-event-only) — the events it skipped would be checkpointed past and never delivered. `Reactor.new/2` raises `ArgumentError` on such a filter, as it does on anything else it is constructed wrongly with.
 
 A reactor with no checkpoint yet has to start somewhere, and `start_after_position` is the declaration that says where:
 
@@ -194,11 +194,11 @@ Ariadne.Flow.Reactor.new(
 )
 ```
 
-`sync: true` says something about the dispatch, not about where the reactor runs. Both kinds of reactor are offered to the [engine](#the-engine) the same way and either may end up on a job system; what synchronous adds is that once the events are committed, `dispatch/3` waits for the reactor to reach them before returning. Declare it for the reactor whose work the caller reads back immediately — a request that finishes by rendering the read model this reactor maintains.
+`sync: true` says something about the dispatch, not about where the reactor runs. Both kinds of reactor are offered to the [scheduler](#the-scheduler) the same way and either may end up on a job system; what synchronous adds is that once the events are committed, `dispatch/3` waits for the reactor to reach them before returning. Declare it for the reactor whose work the caller reads back immediately — a request that finishes by rendering the read model this reactor maintains.
 
 What the dispatch waits on is the reactor's **checkpoint**: it returns once every synchronous reactor has checkpointed at or past the last of the dispatch's events *that reactor is going to process*. The target is per reactor, because a checkpoint records the last matching event a reactor consumed and [stays put](#reactors) on events its filter skips — a reactor is caught up once it reaches the highest appended position matching its filter, and one that matches none of the dispatch's events has nothing to catch up to and is not waited on at all.
 
-Deliberately not the state of whatever the engine scheduled — a reactor's events are consumed one run at a time, so a concurrent dispatch's run may be the one that processes these events and leave this dispatch's own run with nothing to do, and a job that no-ops is not a reactor that failed to catch up. The checkpoint is the store's own record of how far the reactor got, so it holds whoever advanced it.
+Deliberately not the state of whatever the scheduler scheduled — a reactor's events are consumed one run at a time, so a concurrent dispatch's run may be the one that processes these events and leave this dispatch's own run with nothing to do, and a job that no-ops is not a reactor that failed to catch up. The checkpoint is the store's own record of how far the reactor got, so it holds whoever advanced it.
 
 The wait is bounded by the `:await_timeout` option, a non-negative number of milliseconds defaulting to 5000:
 
@@ -218,19 +218,19 @@ A synchronous reactor that *fails* is a different outcome, and `Ariadne.Flow.Pos
 
 ### Nesting
 
-A dispatch made inside a transaction the *caller* opened cannot wait for a scheduled run at all. Its events, and any job row the engine wrote alongside them, stay invisible outside that transaction until it commits, so nothing could advance a checkpoint while the dispatch sits inside it waiting — the wait could only ever run out.
+A dispatch made inside a transaction the *caller* opened cannot wait for a scheduled run at all. Its events, and any job row the scheduler wrote alongside them, stay invisible outside that transaction until it commits, so nothing could advance a checkpoint while the dispatch sits inside it waiting — the wait could only ever run out.
 
 `dispatch/3` therefore asks the store whether a transaction is already open before opening its own, and splits the runs accordingly:
 
-- **Synchronous runs are never offered to the engine.** Flow executes them itself, in the caller's transaction, where the uncommitted events are visible. The confirmation comes with the execution rather than being waited for, so the dispatch waits for nothing. What it gives up is the job system for them, and the isolation that comes with a committed transaction: a synchronous reactor that fails here raises inside the caller's transaction, and what that does to the caller's work is the caller's to decide. The `Ariadne.Flow.PostCommitError` says so — it carries `nested: true` and drops the usual "never re-dispatch", because letting the raise propagate rolls the events back with everything else the caller was doing, and the command can then be dispatched again.
-- **Asynchronous runs are offered to the engine as usual and never executed.** A job row inserted in the outer transaction runs after that transaction commits, which is exactly when the next dispatch or `catch_up/2` would have picked the same events up. Whether an engine is configured or not, the work lands in the same place — so nesting behaves the same under every engine.
+- **Synchronous runs are never offered to the scheduler.** Flow executes them itself, in the caller's transaction, where the uncommitted events are visible. The confirmation comes with the execution rather than being waited for, so the dispatch waits for nothing. What it gives up is the job system for them, and the isolation that comes with a committed transaction: a synchronous reactor that fails here raises inside the caller's transaction, and what that does to the caller's work is the caller's to decide. The `Ariadne.Flow.PostCommitError` says so — it carries `nested: true` and drops the usual "never re-dispatch", because letting the raise propagate rolls the events back with everything else the caller was doing, and the command can then be dispatched again.
+- **Asynchronous runs are offered to the scheduler as usual and never executed.** A job row inserted in the outer transaction runs after that transaction commits, which is exactly when the next dispatch or `catch_up/2` would have picked the same events up. Whether a scheduler is configured or not, the work lands in the same place — so nesting behaves the same under every scheduler.
 
-## The engine
+## The scheduler
 
-The `engine` is an `Ariadne.Flow.ReactorEngine` — a **scheduler**, not an execution backend. It is configured on `new/1`, making the application struct the complete description of a context's flow setup: store, reactors, and engine.
+The `scheduler` is an `Ariadne.Flow.Scheduler`, and it does what the name says and nothing more: it enqueues runs durably, it never executes them. It is configured on `new/1`, making the application struct the complete description of a context's flow setup: store, reactors, and scheduler.
 
 ```elixir
-Ariadne.Flow.Application.new(%{store: store, reactors: [CourseSize], engine: MyEngine})
+Ariadne.Flow.Application.new(%{store: store, reactors: [CourseSize], scheduler: MyScheduler})
 ```
 
 It has one callback:
@@ -245,11 +245,11 @@ It has one callback:
 
 `schedule/3` is called **once per dispatch, inside the dispatch's transaction, with the whole run set** — one `Ariadne.Flow.ReactorRun` per reactor, in declaration order. A run is the storeless value that crosses the boundary to a job system: the reactor module and the dispatch metadata, and nothing else. Where the reactor resumes is not part of it, because the checkpoint in the store already says.
 
-The engine returns the runs it scheduled, and that return carries its single obligation: **a run may be reported as scheduled only if it will execute even when this process dies, given the transaction commits.** A row inserted into a job table is that. A message to another process is not. `Ariadne.Flow` executes every run the engine did not claim, so a scheduler that claims fewer runs than it was given — or none, or no engine at all — costs promptness and nothing else.
+The scheduler returns the runs it scheduled, and that return carries its single obligation: **a run may be reported as scheduled only if it will execute even when this process dies, given the transaction commits.** A row inserted into a job table is that. A message to another process is not. `Ariadne.Flow` executes every run the scheduler did not claim, so a scheduler that claims fewer runs than it was given — or none, or no scheduler at all — costs promptness and nothing else.
 
 A claimed run is recognised by its reactor, so returning runs you rebuilt (`load/1` on the args you just dumped, say) claims them just as returning the runs you were handed does.
 
-An Oban engine is the whole of it: `insert_all` the job rows in the transaction `schedule/3` was called in, return the runs. Nothing about failure isolation, nothing about running anything inline — those obligations do not exist any more, because the engine never holds them. Since `schedule/3` runs inside the dispatch's transaction while the append still holds its lock, anything slower than that insert belongs in the job, not here.
+An Oban scheduler is the whole of it: `insert_all` the job rows in the transaction `schedule/3` was called in, return the runs. Nothing about failure isolation, nothing about running anything inline — those obligations do not exist any more, because the scheduler never holds them. Since `schedule/3` runs inside the dispatch's transaction while the append still holds its lock, anything slower than that insert belongs in the job, not here.
 
 The worker on the other side rebuilds the run and executes it:
 
@@ -259,9 +259,9 @@ args = Ariadne.Flow.ReactorRun.dump(run)   # in schedule/3
 args |> Ariadne.Flow.ReactorRun.load() |> Ariadne.Flow.ReactorRun.execute(store)
 ```
 
-The dump carries the dispatch metadata, so context the worker needs (correlation IDs, tenancy) crosses the boundary with the run rather than beside it. `Ariadne.Flow` itself knows nothing about queueing or retries — that is entirely the engine's concern. `Ariadne.Flow.ReactorRun.sync?/1` says whether a dispatch is waiting on this run, which is worth knowing when choosing a queue, but it is not an instruction about where to run it.
+The dump carries the dispatch metadata, so context the worker needs (correlation IDs, tenancy) crosses the boundary with the run rather than beside it. `Ariadne.Flow` itself knows nothing about queueing or retries — that is entirely the scheduler's concern. `Ariadne.Flow.ReactorRun.sync?/1` says whether a dispatch is waiting on this run, which is worth knowing when choosing a queue, but it is not an instruction about where to run it.
 
-**There is no default engine.** Without one, every run is Flow's own to execute after the commit, which is the whole library working out of the box — including synchronous reactors, whose checkpoint is advanced before the wait begins, so the first look confirms and nothing ever sleeps.
+**There is no default scheduler.** Without one, every run is Flow's own to execute after the commit, which is the whole library working out of the box — including synchronous reactors, whose checkpoint is advanced before the wait begins, so the first look confirms and nothing ever sleeps.
 
 ## Catching up out of band
 
@@ -279,7 +279,7 @@ It answers what a dispatch structurally cannot:
 - **Events another node appended.** Reactors are driven by the dispatch that produced the events, so a node that only reads never runs them. `catch_up/2` reacts to writes that happened elsewhere.
 - **Replay**, which is moving a checkpoint back and then catching up. Renaming the reactor does it today: the name is what its checkpoint is keyed on, and a handler that changed enough to need a replay is arguably a new reactor anyway. Truncating whatever effects the old one left behind is the caller's job.
 
-Each configured reactor is built into a run and offered to the [engine](#the-engine) exactly as a dispatch's runs are — the same `schedule/3`, the same `:metadata` option riding along on each run, and the same rule that Flow executes whatever the engine did not claim. What differs is everything a dispatch's events imply and a catch-up has none of:
+Each configured reactor is built into a run and offered to the [scheduler](#the-scheduler) exactly as a dispatch's runs are — the same `schedule/3`, the same `:metadata` option riding along on each run, and the same rule that Flow executes whatever the scheduler did not claim. What differs is everything a dispatch's events imply and a catch-up has none of:
 
 - **It returns a value.** `:ok`, or `{:error, %Ariadne.Flow.ReactorError{}}` carrying one entry per failed reactor with its `name`, the `position` it failed at and its `reason` — a raised handler included, caught the same way a dispatch catches it. A dispatch cannot return a reactor failure because its events are committed and a retry wrapper around it would append them twice; a catch-up writes nothing of its own, so retrying it is always safe — and an error value is what a cron caller can act on.
 - **Nothing is awaited.** No events were appended and no caller is waiting to read a write back, so `sync: true` says nothing here. A synchronous reactor is treated like any other and `catch_up/2` returns without waiting on a checkpoint.
@@ -321,6 +321,6 @@ A dispatch [nested](#nesting) in a transaction the caller opened is not retried 
 
 Retrying is safe because nothing was committed, which is also the limit of it. That covers the two error *values* — the conflict and the command's own refusal — and nothing else. A raise out of a dispatch means the events *were* committed, and re-dispatching would append them a second time. Now that the framework retries the error values itself, that line is all a caller has left to observe: there is no conflict to catch and retry any more, only raises that must not be retried.
 
-Reactors do not join that contention either. Every run — Flow's own and the engine's alike — happens after the dispatch has committed, with the append lock released, so no reactor's work stalls a concurrent dispatch on the same store, and neither does a dispatch [waiting](#synchronous-reactors) on one. All the dispatch's transaction ever holds the lock for is the append itself, the checkpoint init that goes with it, and the engine's row insert.
+Reactors do not join that contention either. Every run — Flow's own and the scheduler's alike — happens after the dispatch has committed, with the append lock released, so no reactor's work stalls a concurrent dispatch on the same store, and neither does a dispatch [waiting](#synchronous-reactors) on one. All the dispatch's transaction ever holds the lock for is the append itself, the checkpoint init that goes with it, and the scheduler's row insert.
 
 More generally, each event reducer defines its own consistency boundary: its `query/1` tells the Application which events it depends on, and that same query is what concurrency checks against. Two reducers with non-overlapping queries never conflict — `subscribe_student(42, 7)` and `subscribe_student(99, 3)` proceed independently because their tags (`"course:42"` vs `"course:99"`) make their queries disjoint.

@@ -73,7 +73,7 @@ defmodule Ariadne.Flow.Store.InMemory do
   def telemetry_metadata(_agent), do: %{}
 
   # The store's serialized form is the agent itself, so it round-trips only within
-  # the same node — for in-process engines, not for handing a store to another node.
+  # the same node — for in-process schedulers, not for handing a store to another node.
   @impl Backend
   def dump(agent), do: agent
 
