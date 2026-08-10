@@ -50,15 +50,15 @@ defmodule Ariadne.Flow.Query do
       MapSet.subset?(MapSet.new(tags), MapSet.new(event_tags))
     end
 
-    defp validate!(%{types: []}), do: raise(@query_hint_empty_types)
+    defp validate!(%{types: []}), do: raise(ArgumentError, @query_hint_empty_types)
 
     defp validate!(%{types: _} = item),
       do: validate_only_last_event!(Map.get(item, :only_last_event))
 
-    defp validate!(_), do: raise(@query_hint)
+    defp validate!(_), do: raise(ArgumentError, @query_hint)
 
     defp validate_only_last_event!(value) when is_boolean(value) or is_nil(value), do: :ok
-    defp validate_only_last_event!(_), do: raise(@query_hint_only_last_event)
+    defp validate_only_last_event!(_), do: raise(ArgumentError, @query_hint_only_last_event)
   end
 
   @enforce_keys [:items]

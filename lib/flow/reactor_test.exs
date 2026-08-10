@@ -137,13 +137,13 @@ defmodule Ariadne.Flow.ReactorTest do
   end
 
   test "new/2 validates the filter via Query.Item" do
-    assert_raise RuntimeError, fn ->
+    assert_raise ArgumentError, ~r/non-empty list/, fn ->
       Reactor.new(%{name: "example", filter: %{types: []}}, fn _, _ -> :ok end)
     end
   end
 
   test "new/2 rejects a filter asking for only the last event" do
-    assert_raise RuntimeError, ~r/only_last_event/, fn ->
+    assert_raise ArgumentError, ~r/only_last_event/, fn ->
       Reactor.new(
         %{name: "example", filter: %{types: [ExampleEvent], only_last_event: true}},
         fn _, _ -> :ok end

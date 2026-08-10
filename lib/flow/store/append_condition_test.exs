@@ -19,7 +19,9 @@ defmodule Ariadne.Flow.Store.AppendConditionTest do
   end
 
   test "new/1 rejects anything that is not a condition" do
-    assert_raise RuntimeError, fn -> AppendCondition.new(%{after: 1}) end
+    assert_raise ArgumentError, ~r/fail_if_events_match/, fn ->
+      AppendCondition.new(%{after: 1})
+    end
   end
 
   test "for_read/1 conflicts on the read's own query after the last position it saw" do

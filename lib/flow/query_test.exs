@@ -73,10 +73,13 @@ defmodule Ariadne.Flow.QueryTest do
   end
 
   test "Query items are validated" do
-    assert_raise RuntimeError, fn -> Query.new([%{types: []}]) end
-    assert_raise RuntimeError, fn -> Query.new([%{tags: ["test_tag"]}]) end
+    assert_raise ArgumentError, ~r/non-empty list/, fn -> Query.new([%{types: []}]) end
 
-    assert_raise RuntimeError, fn ->
+    assert_raise ArgumentError, ~r/must contain types/, fn ->
+      Query.new([%{tags: ["test_tag"]}])
+    end
+
+    assert_raise ArgumentError, ~r/only_last_event must be a boolean/, fn ->
       Query.new([%{types: ["TestEvent"], only_last_event: "yes"}])
     end
   end
