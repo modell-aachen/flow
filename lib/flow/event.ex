@@ -1,6 +1,6 @@
-defprotocol Ariadne.Flow.Store.Event.Encoder do
+defprotocol Ariadne.Flow.Event do
   defmacro __deriving__(module, options) do
-    target = Keyword.get(options, :to, Ariadne.Flow.Store.Event.Encoder.Default)
+    target = Keyword.get(options, :to, Ariadne.Flow.Event.DefaultEncoder)
 
     declared_type =
       case Keyword.fetch(options, :type) do
@@ -9,7 +9,7 @@ defprotocol Ariadne.Flow.Store.Event.Encoder do
       end
 
     quote do
-      defimpl Ariadne.Flow.Store.Event.Encoder, for: unquote(module) do
+      defimpl Ariadne.Flow.Event, for: unquote(module) do
         unquote(declared_type)
 
         defdelegate encode(event), to: unquote(target)

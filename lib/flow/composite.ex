@@ -1,30 +1,30 @@
 defmodule Ariadne.Flow.Composite do
   @behaviour Ariadne.Flow.EventReducer
 
-  @enforce_keys [:read_model, :map_fn]
+  @enforce_keys [:reducers, :mapper]
   defstruct @enforce_keys
 
-  def new(read_model, map_fn) when is_non_struct_map(read_model) and is_function(map_fn, 1) do
-    %__MODULE__{read_model: read_model, map_fn: map_fn}
+  def new(reducers, mapper) when is_non_struct_map(reducers) and is_function(mapper, 1) do
+    %__MODULE__{reducers: reducers, mapper: mapper}
   end
 
   @impl Ariadne.Flow.EventReducer
-  def reduce(%__MODULE__{read_model: read_model, map_fn: map_fn}, events) do
-    read_model
+  def reduce(%__MODULE__{reducers: reducers, mapper: mapper}, events) do
+    reducers
     |> reduce_to_state(events)
-    |> map_fn.()
+    |> mapper.()
   end
 
-  defp reduce_to_state(read_model, events) do
-    for {key, %module{} = projection} <- read_model, into: %{} do
-      {key, module.reduce(projection, events)}
+  defp reduce_to_state(reducers, events) do
+    for {key, %module{} = reducer} <- reducers, into: %{} do
+      {key, module.reduce(reducer, events)}
     end
   end
 
   @impl Ariadne.Flow.EventReducer
-  def query(%__MODULE__{read_model: read_model}) do
-    read_model
+  def query(%__MODULE__{reducers: reducers}) do
+    reducers
     |> Map.values()
-    |> Enum.flat_map(fn %module{} = m -> module.query(m) end)
+    |> Enum.flat_map(fn %module{} = reducer -> module.query(reducer) end)
   end
 end

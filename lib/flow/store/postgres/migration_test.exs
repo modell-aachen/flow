@@ -2,9 +2,9 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
   use ExUnit.Case, async: true
 
   alias Ariadne.Flow.Store
-  alias Ariadne.Flow.Store.Event
   alias Ariadne.Flow.Store.Postgres
   alias Ariadne.Flow.Store.Postgres.Migration
+  alias Ariadne.Flow.Store.Record
   alias Ariadne.Flow.Test.Repo
   alias Ecto.Adapters.SQL.Sandbox
 
@@ -154,7 +154,7 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
   defp append_event do
     store = Postgres.init(repo: Repo, prefix: @prefix)
 
-    Store.append(store, [%Event{type: "Kept", data: %{}, tags: []}])
+    Store.append(store, [%Record{type: "Kept", data: %{}, tags: []}])
   end
 
   defp stored_positions do

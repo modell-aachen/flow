@@ -5,10 +5,11 @@ defmodule Ariadne.Flow.StoreTest do
       Enum.map([Ariadne.Flow.Store.InMemory, Ariadne.Flow.Store.Postgres], &%{store_module: &1})
 
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store
-  alias Ariadne.Flow.Store.Event
-  alias Ariadne.Flow.Store.SequencedEvent
+  alias Ariadne.Flow.Store.Record
+  alias Ariadne.Flow.Store.SequencedRecord
   alias Ariadne.Flow.Store.StoredEventReactor
   alias Ecto.Adapters.SQL.Sandbox
   @created_at ~U[2025-09-10 11:09:49.647209Z]
@@ -37,8 +38,8 @@ defmodule Ariadne.Flow.StoreTest do
       assert 0 == Store.count(store)
 
       Store.append(store, [
-        %Event{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
-        %Event{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []}
+        %Record{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
+        %Record{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []}
       ])
 
       assert 2 == Store.count(store)
@@ -48,22 +49,22 @@ defmodule Ariadne.Flow.StoreTest do
       Store.append(
         store,
         [
-          %Event{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
-          %Event{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []}
+          %Record{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
+          %Record{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []}
         ],
         created_at: @created_at
       )
 
       assert %{
                events: [
-                 %Ariadne.Flow.Store.SequencedEvent{
-                   event: %Event{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
+                 %Ariadne.Flow.Store.SequencedRecord{
+                   record: %Record{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
                    created_at: @created_at,
                    position: position_1,
                    metadata: %{}
                  },
-                 %Ariadne.Flow.Store.SequencedEvent{
-                   event: %Event{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []},
+                 %Ariadne.Flow.Store.SequencedRecord{
+                   record: %Record{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []},
                    created_at: @created_at,
                    position: position_2,
                    metadata: %{}
@@ -73,17 +74,17 @@ defmodule Ariadne.Flow.StoreTest do
 
       assert position_1 < position_2
 
-      Store.append(store, %Event{type: "PageCreated", data: %{"title" => "Page 3"}, tags: []})
+      Store.append(store, %Record{type: "PageCreated", data: %{"title" => "Page 3"}, tags: []})
 
       assert %{
                events: [
-                 %{event: %Event{type: "PageCreated", data: %{"title" => "Page 1"}}},
+                 %{record: %Record{type: "PageCreated", data: %{"title" => "Page 1"}}},
                  %{
-                   event: %Event{type: "PageCreated", data: %{"title" => "Page 2"}},
+                   record: %Record{type: "PageCreated", data: %{"title" => "Page 2"}},
                    position: position_2
                  },
                  %{
-                   event: %Event{type: "PageCreated", data: %{"title" => "Page 3"}},
+                   record: %Record{type: "PageCreated", data: %{"title" => "Page 3"}},
                    position: position_3,
                    created_at: %DateTime{}
                  }
@@ -97,8 +98,8 @@ defmodule Ariadne.Flow.StoreTest do
       Store.append(
         store,
         [
-          %Event{type: "PageCreated", data: %{}, tags: []},
-          %Event{type: "PageDeleted", data: %{}, tags: []}
+          %Record{type: "PageCreated", data: %{}, tags: []},
+          %Record{type: "PageDeleted", data: %{}, tags: []}
         ],
         metadata: %{"user_id" => "user-123", "trace_id" => "trace-456"}
       )
@@ -106,11 +107,11 @@ defmodule Ariadne.Flow.StoreTest do
       assert %{
                events: [
                  %{
-                   event: %Event{type: "PageCreated"},
+                   record: %Record{type: "PageCreated"},
                    metadata: %{"user_id" => "user-123", "trace_id" => "trace-456"}
                  },
                  %{
-                   event: %Event{type: "PageDeleted"},
+                   record: %Record{type: "PageDeleted"},
                    metadata: %{"user_id" => "user-123", "trace_id" => "trace-456"}
                  }
                ]
@@ -120,26 +121,26 @@ defmodule Ariadne.Flow.StoreTest do
     test "reads into a Read carrying the normalised query and the last position seen",
          %{store: store} do
       Store.append(store, [
-        %Event{type: "PageCreated", data: %{}, tags: []},
-        %Event{type: "PageCreated", data: %{}, tags: []}
+        %Record{type: "PageCreated", data: %{}, tags: []},
+        %Record{type: "PageCreated", data: %{}, tags: []}
       ])
 
       assert %Store.Read{
-               query: %Query{items: [%Query.Item{types: ["PageCreated"]}]},
+               query: %Query{filters: [%Filter{types: ["PageCreated"]}]},
                events: [_, %{position: last_position}],
                last_position: last_position
              } = Store.read(store, [%{types: ["PageCreated"]}, %{types: ["PageCreated"]}])
 
-      assert %Store.Read{query: %Query{items: :all}, events: [_, _]} = Store.read(store)
+      assert %Store.Read{query: %Query{filters: :all}, events: [_, _]} = Store.read(store)
 
-      assert %Store.Read{query: %Query{items: []}, events: [], last_position: 0} =
+      assert %Store.Read{query: %Query{filters: []}, events: [], last_position: 0} =
                Store.read(store, [])
     end
 
-    test "queries events without query items", %{store: store} do
+    test "queries events without filters", %{store: store} do
       Store.append(store, [
-        %Event{type: "PageCreated", data: %{}, tags: []},
-        %Event{type: "PageDeleted", data: %{}, tags: []}
+        %Record{type: "PageCreated", data: %{}, tags: []},
+        %Record{type: "PageDeleted", data: %{}, tags: []}
       ])
 
       assert %{events: []} = Store.read(store, [])
@@ -147,24 +148,24 @@ defmodule Ariadne.Flow.StoreTest do
 
     test "queries events by type", %{store: store} do
       Store.append(store, [
-        %Event{type: "PageCreated", data: %{}, tags: []},
-        %Event{type: "PageDeleted", data: %{}, tags: []}
+        %Record{type: "PageCreated", data: %{}, tags: []},
+        %Record{type: "PageDeleted", data: %{}, tags: []}
       ])
 
-      assert %{events: [%{event: %Event{type: "PageCreated"}}]} =
+      assert %{events: [%{record: %Record{type: "PageCreated"}}]} =
                Store.read(store, [%{types: ["PageCreated"]}])
 
       assert %{
                events: [
-                 %{event: %Event{type: "PageCreated"}},
-                 %{event: %Event{type: "PageDeleted"}}
+                 %{record: %Record{type: "PageCreated"}},
+                 %{record: %Record{type: "PageDeleted"}}
                ]
              } = Store.read(store, [%{types: ["PageCreated", "PageDeleted"]}])
 
       assert %{
                events: [
-                 %{event: %Event{type: "PageCreated"}},
-                 %{event: %Event{type: "PageDeleted"}}
+                 %{record: %Record{type: "PageCreated"}},
+                 %{record: %Record{type: "PageDeleted"}}
                ]
              } = Store.read(store, [%{types: ["PageCreated"]}, %{types: ["PageDeleted"]}])
 
@@ -175,7 +176,7 @@ defmodule Ariadne.Flow.StoreTest do
 
     test "does not support queries only by tags", %{store: store} do
       Store.append(store, [
-        %Event{type: "PageCreated", data: %{}, tags: ["page:Page 1", "type:page"]}
+        %Record{type: "PageCreated", data: %{}, tags: ["page:Page 1", "type:page"]}
       ])
 
       assert_raise(ArgumentError, fn ->
@@ -185,13 +186,13 @@ defmodule Ariadne.Flow.StoreTest do
 
     test "queries by types and tags", %{store: store} do
       Store.append(store, [
-        %Event{
+        %Record{
           type: "PageCreated",
           data: %{"title" => "Page 1"},
           tags: ["page:Page 1", "type:page"]
         },
-        %Event{type: "PageDeleted", data: %{}, tags: ["page:deleted", "type:page"]},
-        %Event{
+        %Record{type: "PageDeleted", data: %{}, tags: ["page:deleted", "type:page"]},
+        %Record{
           type: "PageCreated",
           data: %{"title" => "Page 2"},
           tags: ["page:Page 2", "type:page"]
@@ -200,18 +201,18 @@ defmodule Ariadne.Flow.StoreTest do
 
       assert %{
                events: [
-                 %{event: %Event{type: "PageCreated", data: %{"title" => "Page 2"}}}
+                 %{record: %Record{type: "PageCreated", data: %{"title" => "Page 2"}}}
                ]
              } = Store.read(store, [%{types: ["PageCreated"], tags: ["page:Page 2"]}])
     end
 
-    test "reads only the last event matching an item that asks for it", %{store: store} do
+    test "reads only the last event matching a filter that asks for it", %{store: store} do
       append!(store, "ItemAdded")
 
-      {:ok, %{events: [%SequencedEvent{position: last_added}]}} =
+      {:ok, %{events: [%SequencedRecord{position: last_added}]}} =
         Store.append(
           store,
-          %Event{type: "ItemAdded", data: %{"title" => "Item 2"}, tags: ["item:2"]},
+          %Record{type: "ItemAdded", data: %{"title" => "Item 2"}, tags: ["item:2"]},
           created_at: @created_at,
           metadata: %{"user_id" => "user-123"}
         )
@@ -220,8 +221,8 @@ defmodule Ariadne.Flow.StoreTest do
 
       assert %{
                events: [
-                 %SequencedEvent{
-                   event: %Event{
+                 %SequencedRecord{
+                   record: %Record{
                      type: "ItemAdded",
                      data: %{"title" => "Item 2"},
                      tags: ["item:2"]
@@ -243,7 +244,7 @@ defmodule Ariadne.Flow.StoreTest do
                ])
     end
 
-    test "reads the last event of each item, not of the query", %{store: store} do
+    test "reads the last event of each filter, not of the query", %{store: store} do
       tagged = append_position!(store, "ItemAdded", ["item:1"])
       untagged = append_position!(store, "ItemAdded")
 
@@ -254,7 +255,7 @@ defmodule Ariadne.Flow.StoreTest do
                ])
     end
 
-    test "reads every match of the items beside one that asks for its last event only",
+    test "reads every match of the filters beside one that asks for its last event only",
          %{store: store} do
       first_added = append_position!(store, "ItemAdded")
       second_added = append_position!(store, "ItemAdded")
@@ -284,18 +285,18 @@ defmodule Ariadne.Flow.StoreTest do
       assert %{events: []} = Store.read(store, only_last, after: second)
     end
 
-    test "fails an append condition on an item that asks for its last event only",
+    test "fails an append condition on a filter that asks for its last event only",
          %{store: store} do
       condition = %{fail_if_events_match: [%{types: ["ItemAdded"], only_last_event: true}]}
       first = append_position!(store, "ItemAdded")
 
       assert {:error, :append_condition_failed} ==
-               Store.append(store, %Event{type: "ItemAdded", data: %{}, tags: []},
+               Store.append(store, %Record{type: "ItemAdded", data: %{}, tags: []},
                  condition: condition
                )
 
       assert {:ok, _} =
-               Store.append(store, %Event{type: "ItemAdded", data: %{}, tags: []},
+               Store.append(store, %Record{type: "ItemAdded", data: %{}, tags: []},
                  condition: Map.put(condition, :after, first)
                )
     end
@@ -323,9 +324,9 @@ defmodule Ariadne.Flow.StoreTest do
     end
 
     test "appends events with an append condition", %{store: store} do
-      {:ok, %{events: [%SequencedEvent{position: position, created_at: created_at}]}} =
+      {:ok, %{events: [%SequencedRecord{position: position, created_at: created_at}]}} =
         result =
-        Store.append(store, %Event{type: "PageCreated", data: %{}, tags: ["page:Page 1"]},
+        Store.append(store, %Record{type: "PageCreated", data: %{}, tags: ["page:Page 1"]},
           created_at: @created_at
         )
 
@@ -333,8 +334,8 @@ defmodule Ariadne.Flow.StoreTest do
                {:ok,
                 %{
                   events: [
-                    %SequencedEvent{
-                      event: %Event{type: "PageCreated", data: %{}, tags: ["page:Page 1"]},
+                    %SequencedRecord{
+                      record: %Record{type: "PageCreated", data: %{}, tags: ["page:Page 1"]},
                       position: position,
                       created_at: created_at,
                       metadata: %{}
@@ -343,21 +344,21 @@ defmodule Ariadne.Flow.StoreTest do
                 }}
 
       assert {:error, :append_condition_failed} ==
-               Store.append(store, %Event{type: "PageCreated", data: %{}, tags: []},
+               Store.append(store, %Record{type: "PageCreated", data: %{}, tags: []},
                  condition: %{
                    fail_if_events_match: [%{types: ["PageCreated"], tags: ["page:Page 1"]}]
                  }
                )
 
       assert {:ok, _} =
-               Store.append(store, %Event{type: "PageCreated", data: %{}, tags: ["page:Page 2"]},
+               Store.append(store, %Record{type: "PageCreated", data: %{}, tags: ["page:Page 2"]},
                  condition: %{
                    fail_if_events_match: [%{types: ["PageCreated"], tags: ["page:Page 2"]}]
                  }
                )
 
       assert {:error, :append_condition_failed} ==
-               Store.append(store, %Event{type: "PageCreated", data: %{}, tags: []},
+               Store.append(store, %Record{type: "PageCreated", data: %{}, tags: []},
                  condition: %{
                    fail_if_events_match: [%{types: ["PageCreated"], tags: ["page:Page 2"]}],
                    after: 1
@@ -367,7 +368,7 @@ defmodule Ariadne.Flow.StoreTest do
       assert {:ok, _} =
                Store.append(
                  store,
-                 %Event{type: "PageCreated", data: %{}, tags: []},
+                 %Record{type: "PageCreated", data: %{}, tags: []},
                  condition: %{
                    fail_if_events_match: [%{types: ["PageCreated"], tags: ["page:Page 2"]}],
                    after: 1000
@@ -375,7 +376,7 @@ defmodule Ariadne.Flow.StoreTest do
                )
 
       assert_raise ArgumentError, fn ->
-        Store.append(store, %Event{type: "PageCreated", data: %{}, tags: []},
+        Store.append(store, %Record{type: "PageCreated", data: %{}, tags: []},
           condition: %{after: 1}
         )
       end
@@ -390,8 +391,8 @@ defmodule Ariadne.Flow.StoreTest do
       ])
 
       Store.append(store, [
-        %Event{type: "PageCreated", data: %{}, tags: []},
-        %Event{type: "PageDeleted", data: %{}, tags: []}
+        %Record{type: "PageCreated", data: %{}, tags: []},
+        %Record{type: "PageDeleted", data: %{}, tags: []}
       ])
 
       assert_receive {:telemetry, [:ariadne, :flow, :store, :append, :start], _,
@@ -415,12 +416,12 @@ defmodule Ariadne.Flow.StoreTest do
 
     test "emits telemetry stop with result :error on append condition conflict",
          %{store: store, store_module: backend} do
-      Store.append(store, %Event{type: "PageCreated", data: %{}, tags: ["page:Page 1"]})
+      Store.append(store, %Record{type: "PageCreated", data: %{}, tags: ["page:Page 1"]})
 
       attach_telemetry([[:ariadne, :flow, :store, :append, :stop]])
 
       assert {:error, :append_condition_failed} =
-               Store.append(store, %Event{type: "PageCreated", data: %{}, tags: []},
+               Store.append(store, %Record{type: "PageCreated", data: %{}, tags: []},
                  condition: %{
                    fail_if_events_match: [%{types: ["PageCreated"], tags: ["page:Page 1"]}]
                  }
@@ -470,9 +471,9 @@ defmodule Ariadne.Flow.StoreTest do
 
       assert last_position > 0
 
-      assert_received {:got, "echo", %SequencedEvent{position: p1}}
-      assert_received {:got, "echo", %SequencedEvent{position: p2}}
-      assert_received {:got, "echo", %SequencedEvent{position: p3}}
+      assert_received {:got, "echo", %SequencedRecord{position: p1}}
+      assert_received {:got, "echo", %SequencedRecord{position: p2}}
+      assert_received {:got, "echo", %SequencedRecord{position: p3}}
       assert p1 < p2
       assert p2 < p3
     end
@@ -490,7 +491,7 @@ defmodule Ariadne.Flow.StoreTest do
 
       assert %ConsumeResult{status: :ok, processed: 1} = Store.consume(store, raw_query_reactor)
 
-      assert_received {:got, "echo", %SequencedEvent{event: %Event{type: "ItemAdded"}}}
+      assert_received {:got, "echo", %SequencedRecord{record: %Record{type: "ItemAdded"}}}
     end
 
     test "skips events that do not match the query", %{store: store} do
@@ -506,9 +507,9 @@ defmodule Ariadne.Flow.StoreTest do
                  StoredEventReactor.new(%{name: "echo", query: @item_added, handler: handler})
                )
 
-      assert_received {:got, "echo", %SequencedEvent{event: %Event{type: "ItemAdded"}}}
-      assert_received {:got, "echo", %SequencedEvent{event: %Event{type: "ItemAdded"}}}
-      refute_received {:got, "echo", %SequencedEvent{event: %Event{type: "ItemRemoved"}}}
+      assert_received {:got, "echo", %SequencedRecord{record: %Record{type: "ItemAdded"}}}
+      assert_received {:got, "echo", %SequencedRecord{record: %Record{type: "ItemAdded"}}}
+      refute_received {:got, "echo", %SequencedRecord{record: %Record{type: "ItemRemoved"}}}
     end
 
     test "resumes from the last position on subsequent advances", %{store: store} do
@@ -567,8 +568,8 @@ defmodule Ariadne.Flow.StoreTest do
                  StoredEventReactor.new(%{name: "echo", query: @item_added, handler: handler})
                )
 
-      assert_received {:got, "echo", %SequencedEvent{position: ^third}}
-      refute_received {:got, "echo", %SequencedEvent{position: ^second}}
+      assert_received {:got, "echo", %SequencedRecord{position: ^third}}
+      refute_received {:got, "echo", %SequencedRecord{position: ^second}}
     end
 
     test "starts at the origin for a reactor nobody ever initialized", %{store: store} do
@@ -582,7 +583,7 @@ defmodule Ariadne.Flow.StoreTest do
                  StoredEventReactor.new(%{name: "echo", query: @item_added, handler: handler})
                )
 
-      assert_received {:got, "echo", %SequencedEvent{position: ^first}}
+      assert_received {:got, "echo", %SequencedRecord{position: ^first}}
     end
 
     test "isolates positions across reactor names", %{store: store} do
@@ -612,7 +613,7 @@ defmodule Ariadne.Flow.StoreTest do
 
       failing_handler = fn events ->
         Enum.reduce_while(events, {:ok, 0}, fn seq, {:ok, count} ->
-          if "id:0" in seq.event.tags do
+          if "id:0" in seq.record.tags do
             {:halt, {:error, count, %{event: seq, reason: :zero_not_allowed}}}
           else
             {:cont, {:ok, count + 1}}
@@ -626,7 +627,7 @@ defmodule Ariadne.Flow.StoreTest do
                last_position: last_position,
                more?: false,
                failure: %{
-                 event: %SequencedEvent{event: %Event{tags: ["id:0"]}},
+                 event: %SequencedRecord{record: %Record{tags: ["id:0"]}},
                  reason: :zero_not_allowed
                }
              } =
@@ -680,7 +681,7 @@ defmodule Ariadne.Flow.StoreTest do
       append!(store, "ItemAdded")
 
       capturing_handler = fn events ->
-        Enum.each(events, fn seq -> send(self(), {:saw, seq.event.type}) end)
+        Enum.each(events, fn seq -> send(self(), {:saw, seq.record.type}) end)
         {:ok, length(events)}
       end
 
@@ -849,7 +850,7 @@ defmodule Ariadne.Flow.StoreTest do
                  :ok
                end)
 
-      assert %{events: [%SequencedEvent{}]} = Store.read(store, @item_added_query)
+      assert %{events: [%SequencedRecord{}]} = Store.read(store, @item_added_query)
     end
 
     test "keeps events appended before the function returns an error", %{store: store} do
@@ -859,7 +860,7 @@ defmodule Ariadne.Flow.StoreTest do
                  {:error, :nope}
                end)
 
-      assert %{events: [%SequencedEvent{}]} = Store.read(store, @item_added_query)
+      assert %{events: [%SequencedRecord{}]} = Store.read(store, @item_added_query)
     end
 
     test "rolls back events appended before the function raises", %{store: store} do
@@ -908,11 +909,11 @@ defmodule Ariadne.Flow.StoreTest do
   end
 
   defp append!(store, type, tags \\ []) do
-    Store.append(store, [%Event{type: type, data: %{}, tags: tags}])
+    Store.append(store, [%Record{type: type, data: %{}, tags: tags}])
   end
 
   defp append_position!(store, type, tags \\ []) do
-    {:ok, %{events: [%SequencedEvent{position: position}]}} = append!(store, type, tags)
+    {:ok, %{events: [%SequencedRecord{position: position}]}} = append!(store, type, tags)
     position
   end
 
@@ -940,8 +941,8 @@ defmodule Ariadne.Flow.StoreTest do
   describe "dump/1 and load/1" do
     test "round-trip a store back to one that reads the same events", %{store: store} do
       Store.append(store, [
-        %Event{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
-        %Event{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []}
+        %Record{type: "PageCreated", data: %{"title" => "Page 1"}, tags: []},
+        %Record{type: "PageCreated", data: %{"title" => "Page 2"}, tags: []}
       ])
 
       reloaded =

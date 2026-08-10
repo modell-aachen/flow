@@ -8,7 +8,7 @@ Here is an example of such an event:
 
 ```elixir
 defmodule CourseDefined do
-  @derive {Ariadne.Flow.Store.Event.Encoder, type: "course-defined"}
+  @derive {Ariadne.Flow.Event, type: "course-defined"}
   defstruct [:course_id, :capacity]
 
   def tags(e), do: ["course:#{e.course_id}"]
@@ -20,9 +20,9 @@ Each event consists of the following essential parts:
   derive. Here the event type is `"course-defined"`. Left out, it defaults to the module name —
   `"CourseDefined"` — which ties the stored history to what the module is called; see
   [Renaming an event module](#renaming-an-event-module) for why declaring it is worth the one line.
-- The `Ariadne.Flow.Store.Event.Encoder` protocol implementation. Each event needs to implement
-  this protocol, which allows us to append and read the event in the `Ariadne.Flow.Store`.
-  With `@derive Ariadne.Flow.Store.Event.Encoder` the event gets the default encoder implementation.
+- The `Ariadne.Flow.Event` protocol implementation. Each event needs to implement this protocol,
+  which allows us to append and read the event in the `Ariadne.Flow.Store`. With
+  `@derive Ariadne.Flow.Event` the event gets the default encoder implementation.
 - The `defstruct`. It carries the data of the event. Here it has a course id and a capacity.
 - The `tags/1` function. It receives the event struct and returns a list of tag strings. Tags are
   saved alongside the event in the store. Their role is explained on the Event Reducer page. Here
@@ -46,7 +46,7 @@ An event that does not declare one is stored under its module name, so renaming 
 
 ```elixir
 defmodule LessonScheduled do
-  @derive Ariadne.Flow.Store.Event.Encoder
+  @derive Ariadne.Flow.Event
   defstruct [:course_id, :lesson_id]
 
   def tags(e), do: ["course:#{e.course_id}"]
@@ -57,7 +57,7 @@ The remedy is to declare that string on the module that replaced it:
 
 ```elixir
 defmodule Scheduling.LessonScheduled do
-  @derive {Ariadne.Flow.Store.Event.Encoder, type: "LessonScheduled"}
+  @derive {Ariadne.Flow.Event, type: "LessonScheduled"}
   defstruct [:course_id, :lesson_id]
 
   def tags(e), do: ["course:#{e.course_id}"]

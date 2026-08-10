@@ -1,12 +1,13 @@
 defmodule Ariadne.Flow.Store.StoredEventReactorTest do
   use ExUnit.Case, async: true
+  alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store.StoredEventReactor
 
   test "new/1 normalises the query" do
     assert %StoredEventReactor{
              name: "echo",
-             query: %Query{items: [%Query.Item{types: ["ItemAdded"], only_last_event: false}]}
+             query: %Query{filters: [%Filter{types: ["ItemAdded"], only_last_event: false}]}
            } = new(%{query: [%{types: ["ItemAdded"]}]})
   end
 

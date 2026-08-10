@@ -1,4 +1,4 @@
-defmodule Ariadne.Flow.Store.Event.Encoder.Default do
+defmodule Ariadne.Flow.Event.DefaultEncoder do
   def encode(%module{} = event) do
     data =
       event
@@ -32,7 +32,7 @@ defmodule Ariadne.Flow.Store.Event.Encoder.Default do
       with DateTime, Date, atom, tuple, or struct fields, provide a custom \
       encoder that round-trips them:
 
-          @derive {Ariadne.Flow.Store.Event.Encoder, to: MyEncoder}
+          @derive {Ariadne.Flow.Event, to: MyEncoder}
       """
     end
   end

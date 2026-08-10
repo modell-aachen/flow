@@ -1,19 +1,19 @@
 defmodule Ariadne.Flow.Projection do
   @behaviour Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Envelope
-  alias Ariadne.Flow.Query
+  alias Ariadne.Flow.Filter
   @enforce_keys [:state, :filter, :handler]
   defstruct @enforce_keys
 
   def new(%{initial_state: state, filter: filter}, handler) when is_function(handler, 3) do
-    %__MODULE__{state: state, filter: Query.Item.new(filter), handler: handler}
+    %__MODULE__{state: state, filter: Filter.new(filter), handler: handler}
   end
 
   @impl Ariadne.Flow.EventReducer
   def reduce(%__MODULE__{state: state, filter: filter, handler: handler}, events) do
     events
-    |> Enum.filter(&Query.Item.matches?(filter, &1))
-    |> Query.Item.take_last(filter)
+    |> Enum.filter(&Filter.matches?(filter, &1))
+    |> Filter.take_last(filter)
     |> Enum.reduce(state, &build_state(&1, &2, handler))
   end
 

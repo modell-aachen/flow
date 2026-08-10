@@ -8,22 +8,26 @@ defmodule Ariadne.Flow.Application do
   alias Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Handoff
   alias Ariadne.Flow.PostCommitError
-  alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
+  alias Ariadne.Flow.Scheduler
   alias Ariadne.Flow.Store
 
-  defstruct [:store, reactors: [], engine: nil]
+  defstruct [:store, reactors: [], scheduler: nil]
 
   def new(%{store: %Store{} = store} = attrs) do
     %__MODULE__{
       store: store,
       reactors: distinctly_named(Map.get(attrs, :reactors, [])),
-      engine: ReactorEngine.normalize(Map.get(attrs, :engine))
+      scheduler: Scheduler.normalize(Map.get(attrs, :scheduler))
     }
   end
 
-  def dispatch(%__MODULE__{store: store, reactors: reactors, engine: engine}, command, opts \\ []) do
+  def dispatch(
+        %__MODULE__{store: store, reactors: reactors, scheduler: scheduler},
+        command,
+        opts \\ []
+      ) do
     nested = Store.in_transaction?(store)
     metadata = Keyword.get(opts, :metadata, %{})
 
@@ -35,7 +39,7 @@ defmodule Ariadne.Flow.Application do
       })
 
     handoff =
-      Handoff.new(%{reactors: reactors, engine: engine, metadata: metadata, nested: nested})
+      Handoff.new(%{reactors: reactors, scheduler: scheduler, metadata: metadata, nested: nested})
 
     consistency =
       Consistency.new(%{
@@ -64,8 +68,8 @@ defmodule Ariadne.Flow.Application do
     end
   end
 
-  def catch_up(%__MODULE__{store: store, reactors: reactors, engine: engine}, opts \\ []) do
-    %{reactors: reactors, engine: engine, metadata: Keyword.get(opts, :metadata, %{})}
+  def catch_up(%__MODULE__{store: store, reactors: reactors, scheduler: scheduler}, opts \\ []) do
+    %{reactors: reactors, scheduler: scheduler, metadata: Keyword.get(opts, :metadata, %{})}
     |> Handoff.new()
     |> Handoff.catch_up(store)
     |> Handoff.execute(store)

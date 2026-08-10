@@ -1,25 +1,25 @@
-defmodule Ariadne.Flow.Store.Event.TypeTest do
+defmodule Ariadne.Flow.Event.TypeTest do
   use ExUnit.Case, async: true
 
-  alias Ariadne.Flow.Store.Event.Encoder
-  alias Ariadne.Flow.Store.Event.Type
+  alias Ariadne.Flow.Event
+  alias Ariadne.Flow.Event.Type
 
   defmodule DefaultTypeEvent do
-    @derive Encoder
+    @derive Event
     defstruct [:label]
 
     def tags(_), do: []
   end
 
   defmodule PinnedTypeEvent do
-    @derive {Encoder, type: "type-test-pinned"}
+    @derive {Event, type: "type-test-pinned"}
     defstruct [:label]
 
     def tags(_), do: []
   end
 
   defmodule PinnedCustomEncoderEvent do
-    @derive {Encoder, to: Encoder.Default, type: "type-test-custom-encoder"}
+    @derive {Event, to: Event.DefaultEncoder, type: "type-test-custom-encoder"}
     defstruct [:label]
 
     def tags(_), do: []
@@ -30,13 +30,15 @@ defmodule Ariadne.Flow.Store.Event.TypeTest do
 
     def tags(_), do: []
 
-    defimpl Encoder do
-      alias Ariadne.Flow.Store.Event.Encoder.Default
+    defimpl Event do
+      alias Ariadne.Flow.Event.DefaultEncoder
 
       def type, do: "type-test-impl"
 
-      def encode(event), do: Default.encode(event)
-      def decode(event, store_data, metadata), do: Default.decode(event, store_data, metadata)
+      def encode(event), do: DefaultEncoder.encode(event)
+
+      def decode(event, store_data, metadata),
+        do: DefaultEncoder.decode(event, store_data, metadata)
     end
   end
 
@@ -45,11 +47,13 @@ defmodule Ariadne.Flow.Store.Event.TypeTest do
 
     def tags(_), do: []
 
-    defimpl Encoder do
-      alias Ariadne.Flow.Store.Event.Encoder.Default
+    defimpl Event do
+      alias Ariadne.Flow.Event.DefaultEncoder
 
-      def encode(event), do: Default.encode(event)
-      def decode(event, store_data, metadata), do: Default.decode(event, store_data, metadata)
+      def encode(event), do: DefaultEncoder.encode(event)
+
+      def decode(event, store_data, metadata),
+        do: DefaultEncoder.decode(event, store_data, metadata)
     end
   end
 
@@ -57,13 +61,13 @@ defmodule Ariadne.Flow.Store.Event.TypeTest do
     defstruct [:label]
   end
 
-  defmodule Module.concat(Encoder, MistypedEvent) do
+  defmodule Module.concat(Event, MistypedEvent) do
     def type, do: 42
   end
 
   describe "the type an event is stored under" do
     test "is the module name unless the event declares one" do
-      assert "Ariadne.Flow.Store.Event.TypeTest.DefaultTypeEvent" == Type.of(DefaultTypeEvent)
+      assert "Ariadne.Flow.Event.TypeTest.DefaultTypeEvent" == Type.of(DefaultTypeEvent)
     end
 
     test "is the type pinned on the derive" do
@@ -79,12 +83,12 @@ defmodule Ariadne.Flow.Store.Event.TypeTest do
     end
 
     test "falls back to the module name for a hand-written implementation declaring none" do
-      assert "Ariadne.Flow.Store.Event.TypeTest.UnpinnedByImplEvent" ==
+      assert "Ariadne.Flow.Event.TypeTest.UnpinnedByImplEvent" ==
                Type.of(UnpinnedByImplEvent)
     end
 
     test "is the module name for a module with no encoder at all" do
-      assert "Ariadne.Flow.Store.Event.TypeTest" == Type.of(__MODULE__)
+      assert "Ariadne.Flow.Event.TypeTest" == Type.of(__MODULE__)
     end
 
     test "has to be a string" do
@@ -97,7 +101,7 @@ defmodule Ariadne.Flow.Store.Event.TypeTest do
   describe "the module a stored type belongs to" do
     test "is found by module name for an event declaring no type" do
       assert DefaultTypeEvent ==
-               Type.module!("Ariadne.Flow.Store.Event.TypeTest.DefaultTypeEvent")
+               Type.module!("Ariadne.Flow.Event.TypeTest.DefaultTypeEvent")
     end
 
     test "is found by the type the event declares" do
@@ -110,7 +114,7 @@ defmodule Ariadne.Flow.Store.Event.TypeTest do
 
       Code.compile_string("""
       defmodule #{inspect(__MODULE__)}.LateEvent do
-        @derive {Ariadne.Flow.Store.Event.Encoder, type: "type-test-late"}
+        @derive {Ariadne.Flow.Event, type: "type-test-late"}
         defstruct [:label]
 
         def tags(_), do: []

@@ -3,7 +3,7 @@ defmodule Ariadne.Flow.Test.Gwt.HelpersTest do
   alias Ariadne.Flow.Envelope
 
   defmodule ExampleEvent do
-    @derive {Ariadne.Flow.Store.Event.Encoder, type: "example-event"}
+    @derive {Ariadne.Flow.Event, type: "example-event"}
     defstruct [:id]
 
     def tags(%{id: id}), do: ["thing:#{id}"]
