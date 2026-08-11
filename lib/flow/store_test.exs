@@ -206,6 +206,39 @@ defmodule Ariadne.Flow.StoreTest do
              } = Store.read(store, [%{types: ["PageCreated"], tags: ["page:Page 2"]}])
     end
 
+    test "queries by types and every tag a filter asks for", %{store: store} do
+      Store.append(store, [
+        %Record{
+          type: "PageCreated",
+          data: %{"title" => "Both"},
+          tags: ["type:page", "team:core"]
+        },
+        %Record{type: "PageCreated", data: %{"title" => "One"}, tags: ["type:page"]},
+        %Record{
+          type: "PageCreated",
+          data: %{"title" => "Extra"},
+          tags: ["type:page", "team:core", "env:prod"]
+        }
+      ])
+
+      assert %{
+               events: [
+                 %{record: %Record{data: %{"title" => "Both"}}},
+                 %{record: %Record{data: %{"title" => "Extra"}}}
+               ]
+             } = Store.read(store, [%{types: ["PageCreated"], tags: ["type:page", "team:core"]}])
+    end
+
+    test "refuses a tag constraint that cannot constrain", %{store: store} do
+      assert_raise ArgumentError, ~r/omitted rather than empty/, fn ->
+        Store.read(store, [%{types: ["PageCreated"], tags: []}])
+      end
+
+      assert_raise ArgumentError, ~r/must not repeat/, fn ->
+        Store.read(store, [%{types: ["PageCreated"], tags: ["type:page", "type:page"]}])
+      end
+    end
+
     test "reads only the last event matching a filter that asks for it", %{store: store} do
       append!(store, "ItemAdded")
 

@@ -47,6 +47,27 @@ defmodule Ariadne.Flow.FilterTest do
     end
   end
 
+  test "Filters reject a tag constraint that cannot constrain" do
+    assert_raise ArgumentError, ~r/omitted rather than empty/, fn ->
+      Filter.new(%{types: ["TestEvent"], tags: []})
+    end
+
+    assert_raise ArgumentError, ~r/must not repeat/, fn ->
+      Filter.new(%{types: ["TestEvent"], tags: ["test_tag", "test_tag"]})
+    end
+
+    assert_raise ArgumentError, ~r/tags must be a list/, fn ->
+      Filter.new(%{types: ["TestEvent"], tags: "test_tag"})
+    end
+  end
+
+  test "Filters keep a tag constraint that can be satisfied exactly as given" do
+    assert %Filter{tags: ["test_tag", "other_tag"]} =
+             Filter.new(%{types: ["TestEvent"], tags: ["test_tag", "other_tag"]})
+
+    assert %Filter{tags: nil} = Filter.new(%{types: ["TestEvent"]})
+  end
+
   test "An event matches a filter by type and by every tag the filter asks for" do
     filter = Filter.new(%{types: ["TestEvent"], tags: ["test_tag"]})
 

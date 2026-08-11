@@ -5,7 +5,8 @@
     "dexter@0.7.1",
     "beamMinimal29Packages.erlang@29.0.3",
     "beamMinimal29Packages.expert@0.1.6",
-    "postgresql@18.4"
+    "postgresql@18.4",
+    "openspec@1.7.0"
   ],
   "env": {
     "MIX_ENV":                             "test",
