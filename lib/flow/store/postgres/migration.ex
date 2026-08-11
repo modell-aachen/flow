@@ -45,11 +45,12 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
   @spec down(keyword()) :: :ok
   def down(opts \\ []) do
     opts = normalize(opts, @initial_version)
-    installed = rollback_from(installed_version(opts.prefix))
+    stamped = stamped_version(opts.prefix)
+    installed = rollback_from(stamped)
 
     if installed >= opts.version do
       apply_versions(installed..opts.version//-1, :down, opts)
-      record_version(opts, opts.version - 1)
+      record_rollback(opts, stamped)
     else
       :ok
     end
@@ -79,8 +80,11 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
     renamed
   end
 
-  defp rollback_from(0), do: @current_version
-  defp rollback_from(installed), do: installed
+  defp rollback_from(nil), do: @current_version
+  defp rollback_from(stamped), do: stamped
+
+  defp record_rollback(_opts, nil), do: :ok
+  defp record_rollback(opts, _stamped), do: record_version(opts, opts.version - 1)
 
   defp apply_versions(versions, direction, opts) do
     Enum.each(versions, fn version -> apply(version_module(version), direction, [opts]) end)
@@ -90,15 +94,17 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
     Module.concat(__MODULE__, "V" <> String.pad_leading(to_string(version), 2, "0"))
   end
 
-  defp installed_version(prefix) do
-    Enum.find_value(@version_tables, &recorded_version(&1, prefix)) || unstamped_version(prefix)
+  defp installed_version(prefix), do: stamped_version(prefix) || shape_floor(prefix)
+
+  defp stamped_version(prefix) do
+    Enum.find_value(@version_tables, &comment_version(&1, prefix))
   end
 
-  defp unstamped_version(prefix) do
+  defp shape_floor(prefix) do
     if renamed?(prefix), do: @renamed_version, else: 0
   end
 
-  defp recorded_version(table, prefix) do
+  defp comment_version(table, prefix) do
     %{rows: rows} = repo().query!(@version_query, [table, prefix], log: false)
 
     with [[description]] <- rows,

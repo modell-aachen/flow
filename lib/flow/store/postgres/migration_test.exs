@@ -218,6 +218,38 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
       refute relation_exists?("ariadne_flow_store")
     end
 
+    test "rolling a schema without a store back to version 2 stamps nothing" do
+      create_schema()
+
+      migrate(Install, :rollback_to_v02)
+
+      for relation <- @relations ++ @legacy, do: refute(relation_exists?(relation))
+    end
+
+    test "leaves an unstamped version 1 store unstamped when rolling back to version 2" do
+      install_v01()
+      forget_version("modac_flow_store")
+
+      migrate(Install, :rollback_to_v02)
+
+      for relation <- @legacy, do: assert(relation_kind(relation) == "r")
+      refute relation_exists?("ariadne_flow_store")
+      refute recorded_version("modac_flow_store")
+    end
+
+    test "sweeps an unstamped renamed store from the newest version" do
+      install()
+      append_event()
+      forget_version()
+
+      migrate(Install, :rollback_to_v02)
+
+      for relation <- @legacy, do: assert(relation_kind(relation) == "r")
+      for relation <- @relations, do: assert(relation_kind(relation) == "v")
+      assert positions("ariadne_flow_store") == [1]
+      refute recorded_version("modac_flow_store")
+    end
+
     test "rejects a version below the initial one" do
       assert_raise ArgumentError, ~r/:version to be between 1 and 3/, fn ->
         Migration.down(prefix: @prefix, version: 0)

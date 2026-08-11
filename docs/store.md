@@ -42,7 +42,21 @@ The installed version is recorded in the store itself, as a comment on the event
 
 Running a migration more than once is safe in either direction. `change/0` is not: the versioning has to know which way it is going, so a store migration needs the explicit `up/0` and `down/0` pair. Neither is `@disable_ddl_transaction true`: version 3 renames three tables and expects the swap to be atomic, so a migration that calls `up/1` has to keep its DDL transaction.
 
-One upgrade path is not free to skip a release: **deploy the release that installs schema version 2 everywhere before deploying the one that installs version 3.** Version 2 puts `ariadne_*` views in front of the `modac_*` tables the store started out with, so pods on either release address the same rows; version 3 renames the tables to `ariadne_*` and drops the views. Pods already on version 2 keep working across the swap — their names resolve to the renamed tables the moment it commits, and the `ALTER TABLE ... RENAME` statements cost them a moment of latency rather than an error. Pods older than that lose the tables mid-flight, so going from a pre-version-2 release straight to a version-3 one breaks every one of them that is still running.
+One upgrade path is not free to skip a release: **deploy the release that installs schema version 2 everywhere before deploying the one that installs version 3.** Version 2 puts `ariadne_*` views in front of the `modac_*` tables the store started out with, so pods on either release address the same rows; version 3 renames the tables to `ariadne_*` and drops the views. Pods already on version 2 come through the swap without an error — their names resolve to the renamed tables the moment it commits. Pods older than that lose the tables mid-flight, so going from a pre-version-2 release straight to a version-3 one breaks every one of them that is still running.
+
+Version 2 adds three new database objects, and privileges on a table are not inherited by a view over it. A deployment that grants privileges per object rather than per schema has to grant the application role the same rights on the three views that it holds on the `modac_*` tables, or its version-2 pods fail every read and append with `permission denied for view ariadne_flow_store`. Version 3 needs no such step: grants follow the table through a rename.
+
+Version 3 is cheap but not lock-free, and it is worth a word on what the swap costs. `DROP VIEW` and `ALTER TABLE ... RENAME` both take `ACCESS EXCLUSIVE`, which conflicts with the `ACCESS SHARE` every read holds. One long-running query open when the migration starts blocks it, and once its lock request is queued every *subsequent* query on the store queues behind that — so a store under continuous load stalls for as long as the slowest open transaction, not for a moment. The rename itself is metadata-only and instant. Since the migration has to keep its DDL transaction, `lock_timeout` is the lever: set one so the migration gives up instead of forming a queue behind a long reader, and retry it.
+
+```elixir
+def up do
+  execute("SET LOCAL lock_timeout = '5s'")
+
+  Ariadne.Flow.Store.Postgres.Migration.up(prefix: "public")
+end
+```
+
+A migration that fails on `lock_timeout` has rolled back and can simply be run again — pick a window with no long-running readers, or cancel them first.
 
 ### Initializing a store
 
