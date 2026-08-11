@@ -4,10 +4,10 @@ defmodule Ariadne.Flow.Store.Postgres do
 
   import Ecto.Query
 
-  alias Ariadne.Flow.ConsumeResult
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Backend
+  alias Ariadne.Flow.Store.Consumption
   alias Ariadne.Flow.Store.SequencedRecord
   alias Ariadne.Flow.Store.StoredEventReactor
 
@@ -178,12 +178,8 @@ defmodule Ariadne.Flow.Store.Postgres do
 
         %{events: events} = read(config, query, after: prior_position, limit: @batch_size + 1)
 
-        {batch, more_in_store?} =
-          if length(events) > @batch_size,
-            do: {Enum.take(events, @batch_size), true},
-            else: {events, false}
-
-        {result, new_position} = build_result(batch, prior_position, more_in_store?, handler)
+        {batch, more_in_store?} = Consumption.split(events, @batch_size)
+        {result, new_position} = Consumption.run(batch, prior_position, more_in_store?, handler)
         write_checkpoint_position(config, name, new_position)
         result
       end)
@@ -250,34 +246,6 @@ defmodule Ariadne.Flow.Store.Postgres do
 
     key
   end
-
-  defp build_result(batch, prior_position, more_in_store?, handler) do
-    case handler.(batch) do
-      {:ok, count} ->
-        new_position = position_after(batch, count, prior_position)
-
-        {%ConsumeResult{
-           status: :ok,
-           processed: count,
-           last_position: new_position,
-           more?: more_in_store?
-         }, new_position}
-
-      {:error, count, failure} ->
-        new_position = position_after(batch, count, prior_position)
-
-        {%ConsumeResult{
-           status: :error,
-           processed: count,
-           last_position: new_position,
-           more?: false,
-           failure: failure
-         }, new_position}
-    end
-  end
-
-  defp position_after(_batch, 0, prior_position), do: prior_position
-  defp position_after(batch, count, _prior) when count > 0, do: Enum.at(batch, count - 1).position
 
   defp write_checkpoint_position(
          %__MODULE__{repo: repo, prefix: prefix, context: context},

@@ -89,6 +89,12 @@ defmodule Ariadne.Flow.Store.Backend do
   handler reports back how many events of the batch it processed, and the new checkpoint
   is the position of the last of those — a handler that fails part-way through leaves the
   rest to be delivered again. The batch size is the backend's own choice.
+
+  The handler runs in the calling process, inside a transaction on this store, with the
+  reactor's name held against every other consume of it — so a handler may read from,
+  append to and dispatch into the store it is consuming from, another consume of the same
+  reactor waits rather than delivering the same events twice, and a handler that raises
+  takes the checkpoint and everything it wrote down with it.
   """
   @callback consume(config(), StoredEventReactor.t()) :: ConsumeResult.t()
 

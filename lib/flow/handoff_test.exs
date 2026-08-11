@@ -177,16 +177,18 @@ defmodule Ariadne.Flow.HandoffTest do
     )
   end
 
+  # Module reactors cannot close over the test pid, so they report back through the
+  # :inbox of the process their handler runs in — the one driving the store.
   defp inbox_store do
-    store = Store.InMemory.init()
-    test_pid = self()
+    Process.put(:inbox, self())
 
-    Agent.update(store.config, fn state ->
-      Process.put(:inbox, test_pid)
-      state
-    end)
+    Store.InMemory.init()
+  end
 
-    store
+  defp driving(inbox, fun) do
+    Process.put(:inbox, inbox)
+
+    fun.()
   end
 
   # A raising reactor takes the InMemory agent down with it, so a raise can only be
@@ -687,10 +689,12 @@ defmodule Ariadne.Flow.HandoffTest do
       total = 20
       events = Enum.flat_map(1..total, fn _ -> append(store) end)
 
+      inbox = self()
+
       drivers = [
-        fn -> drive([FromOriginReactor], store, events) end,
-        fn -> catch_up([FromOriginReactor], store) end,
-        fn -> catch_up([FromOriginReactor], store) end
+        fn -> driving(inbox, fn -> drive([FromOriginReactor], store, events) end) end,
+        fn -> driving(inbox, fn -> catch_up([FromOriginReactor], store) end) end,
+        fn -> driving(inbox, fn -> catch_up([FromOriginReactor], store) end) end
       ]
 
       results =
