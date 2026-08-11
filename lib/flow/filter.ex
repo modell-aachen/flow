@@ -13,6 +13,9 @@ defmodule Ariadne.Flow.Filter do
   @filter_hint "A filter must contain types and may contain tags and only_last_event"
   @filter_hint_empty_types "A filter's types must be a non-empty list"
   @filter_hint_only_last_event "A filter's only_last_event must be a boolean"
+  @filter_hint_tags "A filter's tags must be a list"
+  @filter_hint_empty_tags "A filter's tags must be omitted rather than empty"
+  @filter_hint_repeated_tags "A filter's tags must not repeat"
 
   def new(filter) do
     validate!(filter)
@@ -49,10 +52,23 @@ defmodule Ariadne.Flow.Filter do
 
   defp validate!(%{types: []}), do: raise(ArgumentError, @filter_hint_empty_types)
 
-  defp validate!(%{types: _} = filter),
-    do: validate_only_last_event!(Map.get(filter, :only_last_event))
+  defp validate!(%{types: _} = filter) do
+    validate_tags!(Map.get(filter, :tags))
+    validate_only_last_event!(Map.get(filter, :only_last_event))
+  end
 
   defp validate!(_), do: raise(ArgumentError, @filter_hint)
+
+  defp validate_tags!(nil), do: :ok
+  defp validate_tags!([]), do: raise(ArgumentError, @filter_hint_empty_tags)
+
+  defp validate_tags!(tags) when is_list(tags) do
+    if Enum.uniq(tags) == tags,
+      do: :ok,
+      else: raise(ArgumentError, @filter_hint_repeated_tags)
+  end
+
+  defp validate_tags!(_), do: raise(ArgumentError, @filter_hint_tags)
 
   defp validate_only_last_event!(value) when is_boolean(value) or is_nil(value), do: :ok
   defp validate_only_last_event!(_), do: raise(ArgumentError, @filter_hint_only_last_event)
