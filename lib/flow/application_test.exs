@@ -185,8 +185,13 @@ defmodule Ariadne.Flow.ApplicationTest do
 
     defp defer(_reactor_run, _store, :never), do: :ok
 
+    # The worker is where the reactor handler runs, so it is the process that has to
+    # know the inbox the module reactors report to.
     defp defer(reactor_run, store, delay) do
+      inbox = Process.get(:inbox)
+
       spawn(fn ->
+        Process.put(:inbox, inbox)
         Process.sleep(delay)
         ReactorRun.execute(reactor_run, store)
       end)
@@ -243,18 +248,12 @@ defmodule Ariadne.Flow.ApplicationTest do
     Store.Postgres.init(repo: Repo, prefix: "postgres_store_test_schema")
   end
 
-  # An InMemory store whose agent process knows the test pid, so module reactors
-  # (whose handlers run inside that agent) can report back via Process.get(:inbox).
+  # Module reactors cannot close over the test pid, so they report back through the
+  # :inbox of the process their handler runs in — the one driving the store.
   defp inbox_store do
-    store = Store.InMemory.init()
-    test_pid = self()
+    Process.put(:inbox, self())
 
-    Agent.update(store.config, fn state ->
-      Process.put(:inbox, test_pid)
-      state
-    end)
-
-    store
+    Store.InMemory.init()
   end
 
   # Appending from inside the decide function lands between the command's read and

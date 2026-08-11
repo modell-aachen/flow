@@ -697,6 +697,58 @@ defmodule Ariadne.Flow.StoreTest do
 
       refute_received {:saw, "ItemRemoved"}
     end
+
+    test "runs the handler where it can reach the store it is consuming from",
+         %{store: store} do
+      position = append_position!(store, "ItemAdded")
+      test_pid = self()
+
+      reaching_handler = fn events ->
+        send(test_pid, {:read, Store.read(store, @item_added)})
+        send(test_pid, {:checkpoint, Store.checkpoint(store, "reaching")})
+        send(test_pid, {:in_transaction?, Store.in_transaction?(store)})
+        append!(store, "ItemAdded")
+
+        {:ok, length(events)}
+      end
+
+      assert %ConsumeResult{status: :ok, processed: 1, last_position: ^position} =
+               Store.consume(
+                 store,
+                 StoredEventReactor.new(%{
+                   name: "reaching",
+                   query: @item_added,
+                   handler: reaching_handler
+                 })
+               )
+
+      assert_received {:read, %{events: [%SequencedRecord{position: ^position}]}}
+      assert_received {:checkpoint, nil}
+      assert_received {:in_transaction?, true}
+      assert Store.checkpoint(store, "reaching") == position
+    end
+
+    test "leaves the reactor and everything the handler wrote behind when it raises",
+         %{store: store} do
+      append!(store, "ItemAdded")
+
+      raising_handler = fn _events ->
+        append!(store, "ItemAdded")
+        raise "boom"
+      end
+
+      reactor =
+        StoredEventReactor.new(%{
+          name: "raising",
+          query: @item_added,
+          handler: raising_handler
+        })
+
+      assert_raise RuntimeError, "boom", fn -> Store.consume(store, reactor) end
+
+      assert Store.checkpoint(store, "raising") == nil
+      assert %{events: [%SequencedRecord{}]} = Store.read(store, @item_added)
+    end
   end
 
   describe "checkpoint/2" do

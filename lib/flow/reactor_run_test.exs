@@ -76,18 +76,12 @@ defmodule Ariadne.Flow.ReactorRunTest do
     end
   end
 
-  # An InMemory store whose agent process knows the test pid, so module reactors
-  # (whose handlers run inside that agent) can report back via Process.get(:inbox).
+  # Module reactors cannot close over the test pid, so they report back through the
+  # :inbox of the process their handler runs in — the one driving the store.
   defp inbox_store do
-    store = Store.InMemory.init()
-    test_pid = self()
+    Process.put(:inbox, self())
 
-    Agent.update(store.config, fn state ->
-      Process.put(:inbox, test_pid)
-      state
-    end)
-
-    store
+    Store.InMemory.init()
   end
 
   defp run(reactor_module, attrs \\ %{}) do
