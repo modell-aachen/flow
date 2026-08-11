@@ -9,8 +9,15 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
   alias Ecto.Adapters.SQL.Sandbox
 
   @prefix "migration_test_schema"
-  @tables ~w(modac_flow_store modac_flow_store_tags modac_flow_store_reactor_checkpoints)
-  @views ~w(ariadne_flow_store ariadne_flow_store_tags ariadne_flow_store_reactor_checkpoints)
+  @relations ~w(ariadne_flow_store ariadne_flow_store_tags ariadne_flow_store_reactor_checkpoints)
+  @legacy ~w(modac_flow_store modac_flow_store_tags modac_flow_store_reactor_checkpoints)
+
+  @kind_query """
+  SELECT pg_class.relkind::text
+  FROM pg_class
+  JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+  WHERE pg_class.relname = $2 AND pg_namespace.nspname = $1
+  """
 
   defmodule Install do
     use Ecto.Migration
@@ -30,6 +37,14 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
 
       Migration.up(prefix: @prefix, version: 1)
     end
+
+    def v02 do
+      create_schema()
+
+      Migration.up(prefix: @prefix, version: 2)
+    end
+
+    def rollback_to_v02, do: Migration.down(prefix: @prefix, version: 3)
 
     def rollback_to_v01, do: Migration.down(prefix: @prefix, version: 2)
 
@@ -52,8 +67,9 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
     test "installs the current schema version" do
       install()
 
-      for relation <- @tables ++ @views, do: assert(relation_exists?(relation))
-      assert recorded_version() == "2"
+      for relation <- @relations, do: assert(relation_kind(relation) == "r")
+      for relation <- @legacy, do: refute(relation_exists?(relation))
+      assert recorded_version() == "3"
     end
 
     test "leaves an already migrated store alone" do
@@ -62,36 +78,69 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
 
       install()
 
-      assert recorded_version() == "2"
-      assert stored_positions() == [1]
+      assert recorded_version() == "3"
+      assert positions("ariadne_flow_store") == [1]
     end
 
-    test "adds the views over a version 1 store without recreating its rows" do
+    test "renames the tables of a version 2 store without moving its rows" do
+      install_v02()
+      append_event()
+
+      install()
+
+      for relation <- @relations, do: assert(relation_kind(relation) == "r")
+      for relation <- @legacy, do: refute(relation_exists?(relation))
+      assert recorded_version() == "3"
+      assert positions("ariadne_flow_store") == [1]
+    end
+
+    test "keeps the position sequence of a renamed store" do
+      install_v02()
+      append_event()
+
+      install()
+      append_event()
+
+      assert positions("ariadne_flow_store") == [1, 2]
+    end
+
+    test "walks a version 1 store to the current version without recreating its rows" do
       install_v01()
       insert_event()
 
       install()
 
-      for view <- @views, do: assert(relation_exists?(view))
-      assert recorded_version() == "2"
-      assert stored_positions() == [1]
-      assert view_positions() == [1]
+      for relation <- @relations, do: assert(relation_kind(relation) == "r")
+      assert recorded_version() == "3"
+      assert positions("ariadne_flow_store") == [1]
     end
 
     test "adopts a store that predates the versioning" do
       install_v01()
-      forget_version()
+      forget_version("modac_flow_store")
       insert_event()
 
       install()
 
-      assert recorded_version() == "2"
-      assert stored_positions() == [1]
+      assert recorded_version() == "3"
+      assert positions("ariadne_flow_store") == [1]
+    end
+
+    test "recognises a renamed store whose recorded version was lost" do
+      install()
+      append_event()
+      forget_version()
+
+      install()
+
+      for relation <- @relations, do: assert(relation_kind(relation) == "r")
+      for relation <- @legacy, do: refute(relation_exists?(relation))
+      assert positions("ariadne_flow_store") == [1]
     end
 
     test "rejects a version it does not know" do
-      assert_raise ArgumentError, ~r/:version to be between 1 and 2/, fn ->
-        Migration.up(prefix: @prefix, version: 3)
+      assert_raise ArgumentError, ~r/:version to be between 1 and 3/, fn ->
+        Migration.up(prefix: @prefix, version: 4)
       end
     end
 
@@ -103,13 +152,25 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
   end
 
   describe "down/1" do
-    test "removes the tables, the views and the recorded version" do
+    test "removes the tables and the recorded version" do
       install()
 
       migrate(Install, :down)
 
-      for relation <- @tables ++ @views, do: refute(relation_exists?(relation))
-      refute recorded_version()
+      for relation <- @relations ++ @legacy, do: refute(relation_exists?(relation))
+    end
+
+    test "restores the views over the renamed-back tables and re-records version 2" do
+      install()
+      append_event()
+
+      migrate(Install, :rollback_to_v02)
+
+      for relation <- @legacy, do: assert(relation_kind(relation) == "r")
+      for relation <- @relations, do: assert(relation_kind(relation) == "v")
+      assert recorded_version("modac_flow_store") == "2"
+      assert positions("modac_flow_store") == [1]
+      assert positions("ariadne_flow_store") == [1]
     end
 
     test "removes the views and re-records version 1" do
@@ -117,9 +178,9 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
 
       migrate(Install, :rollback_to_v01)
 
-      for view <- @views, do: refute(relation_exists?(view))
-      for table <- @tables, do: assert(relation_exists?(table))
-      assert recorded_version() == "1"
+      for relation <- @relations, do: refute(relation_exists?(relation))
+      for relation <- @legacy, do: assert(relation_kind(relation) == "r")
+      assert recorded_version("modac_flow_store") == "1"
     end
 
     test "removes a store whose recorded version was lost" do
@@ -128,16 +189,25 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
 
       migrate(Install, :down)
 
-      for relation <- @tables ++ @views, do: refute(relation_exists?(relation))
+      for relation <- @relations ++ @legacy, do: refute(relation_exists?(relation))
+    end
+
+    test "removes a version 2 store whose recorded version was lost" do
+      install_v02()
+      forget_version("modac_flow_store")
+
+      migrate(Install, :down)
+
+      for relation <- @relations ++ @legacy, do: refute(relation_exists?(relation))
     end
 
     test "removes a store that predates the versioning" do
       install_v01()
-      forget_version()
+      forget_version("modac_flow_store")
 
       migrate(Install, :down)
 
-      for table <- @tables, do: refute(relation_exists?(table))
+      for relation <- @legacy, do: refute(relation_exists?(relation))
     end
 
     test "is a no-op on a schema without a store" do
@@ -145,11 +215,11 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
 
       migrate(Install, :down)
 
-      refute relation_exists?("modac_flow_store")
+      refute relation_exists?("ariadne_flow_store")
     end
 
     test "rejects a version below the initial one" do
-      assert_raise ArgumentError, ~r/:version to be between 1 and 2/, fn ->
+      assert_raise ArgumentError, ~r/:version to be between 1 and 3/, fn ->
         Migration.down(prefix: @prefix, version: 0)
       end
     end
@@ -165,13 +235,35 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
     test "is the version the store was migrated to" do
       install()
 
+      assert migrated_version() == 3
+    end
+
+    test "reads the version of a store still on the previous one" do
+      install_v02()
+
       assert migrated_version() == 2
+    end
+
+    test "reads a renamed store whose recorded version was lost from its shape" do
+      install()
+      forget_version()
+
+      assert migrated_version() == 3
+    end
+
+    test "is zero for a version 2 store whose recorded version was lost" do
+      install_v02()
+      forget_version("modac_flow_store")
+
+      assert migrated_version() == 0
     end
   end
 
   defp install, do: migrate(Install, :up)
 
   defp install_v01, do: migrate(Install, :v01)
+
+  defp install_v02, do: migrate(Install, :v02)
 
   defp migrated_version do
     migrate(ReportVersion, :up)
@@ -208,33 +300,32 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
     """)
   end
 
-  defp stored_positions, do: positions("modac_flow_store")
-
-  defp view_positions, do: positions("ariadne_flow_store")
-
   defp positions(relation) do
-    %{rows: rows} = Repo.query!(~s(SELECT position FROM "#{@prefix}"."#{relation}"))
+    %{rows: rows} =
+      Repo.query!(~s(SELECT position FROM "#{@prefix}"."#{relation}" ORDER BY position))
 
     List.flatten(rows)
   end
 
-  defp forget_version do
-    Repo.query!(~s(COMMENT ON TABLE "#{@prefix}".modac_flow_store IS NULL))
+  defp forget_version(relation \\ "ariadne_flow_store") do
+    Repo.query!(~s(COMMENT ON TABLE "#{@prefix}"."#{relation}" IS NULL))
   end
 
-  defp recorded_version do
+  defp recorded_version(relation \\ "ariadne_flow_store") do
     %{rows: [[version]]} =
       Repo.query!("SELECT obj_description(to_regclass($1), 'pg_class')", [
-        "#{@prefix}.modac_flow_store"
+        "#{@prefix}.#{relation}"
       ])
 
     version
   end
 
-  defp relation_exists?(relation) do
-    %{rows: [[exists]]} =
-      Repo.query!("SELECT to_regclass($1) IS NOT NULL", ["#{@prefix}.#{relation}"])
+  defp relation_exists?(relation), do: relation_kind(relation) != nil
 
-    exists
+  defp relation_kind(relation) do
+    case Repo.query!(@kind_query, [@prefix, relation]) do
+      %{rows: [[kind]]} -> kind
+      %{rows: []} -> nil
+    end
   end
 end

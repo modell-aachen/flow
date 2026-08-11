@@ -5,10 +5,10 @@ fold events into values, and an application that dispatches commands and runs
 reactors.
 
 The modules live under the `Ariadne.Flow` namespace. The Postgres store reads and
-writes `ariadne_flow_store*`; the physical tables are still `modac_flow_store*`
-with the new names as views over them, so a rolling deployment can run old and
-new code against the same rows. [docs/store.md](docs/store.md) has the upgrade
-rule that follows from it.
+writes `ariadne_flow_store*`. Those tables were named `modac_flow_store*` before
+schema version 3 renamed them, and the rename spans two releases so that a
+rolling deployment can run old and new code against the same rows —
+[docs/store.md](docs/store.md) has the upgrade rule that follows from it.
 
 The guides in [docs/](docs/introduction.md) cover events, event reducers, the
 application, the store, encoders and testing.

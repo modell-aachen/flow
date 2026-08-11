@@ -23,35 +23,26 @@ end
 - `:prefix` (default `"public"`) — the PostgreSQL schema the tables live in. Must match the prefix passed to `init/1`.
 - `:version` — the schema version to migrate to. `up/1` defaults to the newest version the library knows, `down/1` to the oldest, so the pair above installs the whole store and removes it again.
 
-The store reads and writes `ariadne_flow_store`, `ariadne_flow_store_tags` and
-`ariadne_flow_store_reactor_checkpoints`. As of schema version 2 those are
-updatable views over the tables the store started out with,
-`modac_flow_store*`, which keep their names for one release: during a rolling
-deployment the pods still on the previous release address the tables directly,
-the new ones address the same rows through the views, and both hold the same
-advisory locks. A later schema version renames the tables themselves and drops
-the views.
+The store reads and writes three tables: `ariadne_flow_store`,
+`ariadne_flow_store_tags` and `ariadne_flow_store_reactor_checkpoints`. Run the
+migration before booting the release that reads them: a pod that starts ahead of
+it fails every read, append and consume with `relation "ariadne_flow_store" does
+not exist`, and migrate-on-boot races the same way.
 
-That window only holds if the migration goes first: **run the migration that
-installs version 2 before booting the release that reads through the views.**
-The views do not exist until it commits, so a pod of the new release that starts
-ahead of it fails every read, append and consume with `relation
-"ariadne_flow_store" does not exist` — migrate-on-boot races the same way.
-
-The views are new database objects. A deployment that grants privileges per
-object rather than per schema has to grant the application role the same rights
-on the three views that it holds on the `modac_*` tables — privileges on a
-table are not inherited by a view over it.
+The advisory-lock domain strings the store hashes its `pg_advisory_xact_lock`
+keys from are deliberately *not* named after those tables and never will be.
+They are invisible from the outside, and renaming them would let two library
+versions running against the same database stop excluding each other's appends.
 
 ### Upgrading the schema
 
 The store schema is versioned, and a release that changes it says so in the CHANGELOG. Upgrading is a new migration that calls `up/1` again: it applies every version between the one the store is on and the one you ask for, and does nothing at all when there is none to apply. Pin `version:` to stay on an older schema than the library offers, and roll a version back with `down(version: n)`, which undoes everything from the installed version down to `n` inclusive.
 
-The installed version is recorded in the store itself, as a comment on the `modac_flow_store` table, and `Ariadne.Flow.Store.Postgres.Migration.migrated_version/1` reads it back — inside a migration, like the rest of the API. A store created before the versioning existed reports version `0`; the first `up/1` after upgrading adopts it as version 1 rather than recreating anything and then applies the remaining versions, so there is nothing to do by hand — but an unpinned `up/1` on such a store lands on the newest version in one migration, views included, rather than stopping at 1. Pin `version:` if a later step has to be its own change window.
+The installed version is recorded in the store itself, as a comment on the event table, and `Ariadne.Flow.Store.Postgres.Migration.migrated_version/1` reads it back — inside a migration, like the rest of the API. A store created before the versioning existed reports version `0`; the first `up/1` after upgrading adopts it as version 1 rather than recreating anything and then applies the remaining versions, so there is nothing to do by hand — but an unpinned `up/1` on such a store lands on the newest version in one migration rather than stopping at the next one. Pin `version:` if a later step has to be its own change window.
 
-Running a migration more than once is safe in either direction. `change/0` is not: the versioning has to know which way it is going, so a store migration needs the explicit `up/0` and `down/0` pair.
+Running a migration more than once is safe in either direction. `change/0` is not: the versioning has to know which way it is going, so a store migration needs the explicit `up/0` and `down/0` pair. Neither is `@disable_ddl_transaction true`: version 3 renames three tables and expects the swap to be atomic, so a migration that calls `up/1` has to keep its DDL transaction.
 
-One upgrade path is not free to skip a release: **deploy the release that installs schema version 2 everywhere before deploying the one that installs version 3.** Version 2 is what puts the `ariadne_*` views in front of the `modac_*` tables, and version 3 renames the tables and drops the views. Going from a pre-version-2 release straight to a version-3 one renames the tables away from under pods that are still addressing them by their old names.
+One upgrade path is not free to skip a release: **deploy the release that installs schema version 2 everywhere before deploying the one that installs version 3.** Version 2 puts `ariadne_*` views in front of the `modac_*` tables the store started out with, so pods on either release address the same rows; version 3 renames the tables to `ariadne_*` and drops the views. Pods already on version 2 keep working across the swap — their names resolve to the renamed tables the moment it commits, and the `ALTER TABLE ... RENAME` statements cost them a moment of latency rather than an error. Pods older than that lose the tables mid-flight, so going from a pre-version-2 release straight to a version-3 one breaks every one of them that is still running.
 
 ### Initializing a store
 
