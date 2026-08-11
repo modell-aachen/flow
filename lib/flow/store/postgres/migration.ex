@@ -33,7 +33,7 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
   @spec down(keyword()) :: :ok
   def down(opts \\ []) do
     opts = normalize(opts, @initial_version)
-    installed = max(installed_version(opts.prefix), @initial_version)
+    installed = rollback_from(installed_version(opts.prefix))
 
     if installed >= opts.version do
       apply_versions(installed..opts.version//-1, :down, opts)
@@ -52,8 +52,11 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
   end
 
   @doc false
-  @spec quoted(String.t()) :: String.t()
-  def quoted(identifier), do: ~s("#{String.replace(identifier, ~s("), ~s(""))}")
+  @spec qualified(String.t(), String.t()) :: String.t()
+  def qualified(prefix, relation), do: "#{quoted(prefix)}.#{quoted(relation)}"
+
+  defp rollback_from(0), do: @current_version
+  defp rollback_from(installed), do: installed
 
   defp apply_versions(versions, direction, opts) do
     Enum.each(versions, fn version -> apply(version_module(version), direction, [opts]) end)
@@ -77,8 +80,10 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
   defp record_version(_opts, 0), do: :ok
 
   defp record_version(%{prefix: prefix}, version) do
-    execute(~s(COMMENT ON TABLE #{quoted(prefix)}."#{@version_table}" IS '#{version}'))
+    execute("COMMENT ON TABLE #{qualified(prefix, @version_table)} IS '#{version}'")
   end
+
+  defp quoted(identifier), do: ~s("#{String.replace(identifier, ~s("), ~s(""))}")
 
   defp normalize(opts, default_version) do
     opts

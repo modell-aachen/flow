@@ -32,6 +32,12 @@ the new ones address the same rows through the views, and both hold the same
 advisory locks. A later schema version renames the tables themselves and drops
 the views.
 
+That window only holds if the migration goes first: **run the migration that
+installs version 2 before booting the release that reads through the views.**
+The views do not exist until it commits, so a pod of the new release that starts
+ahead of it fails every read, append and consume with `relation
+"ariadne_flow_store" does not exist` — migrate-on-boot races the same way.
+
 The views are new database objects. A deployment that grants privileges per
 object rather than per schema has to grant the application role the same rights
 on the three views that it holds on the `modac_*` tables — privileges on a
@@ -41,7 +47,7 @@ table are not inherited by a view over it.
 
 The store schema is versioned, and a release that changes it says so in the CHANGELOG. Upgrading is a new migration that calls `up/1` again: it applies every version between the one the store is on and the one you ask for, and does nothing at all when there is none to apply. Pin `version:` to stay on an older schema than the library offers, and roll a version back with `down(version: n)`, which undoes everything from the installed version down to `n` inclusive.
 
-The installed version is recorded in the store itself, as a comment on the `modac_flow_store` table, and `Ariadne.Flow.Store.Postgres.Migration.migrated_version/1` reads it back — inside a migration, like the rest of the API. A store created before the versioning existed reports version `0`; the first `up/1` after upgrading adopts it as version 1 rather than recreating anything, so there is nothing to do by hand.
+The installed version is recorded in the store itself, as a comment on the `modac_flow_store` table, and `Ariadne.Flow.Store.Postgres.Migration.migrated_version/1` reads it back — inside a migration, like the rest of the API. A store created before the versioning existed reports version `0`; the first `up/1` after upgrading adopts it as version 1 rather than recreating anything and then applies the remaining versions, so there is nothing to do by hand — but an unpinned `up/1` on such a store lands on the newest version in one migration, views included, rather than stopping at 1. Pin `version:` if a later step has to be its own change window.
 
 Running a migration more than once is safe in either direction. `change/0` is not: the versioning has to know which way it is going, so a store migration needs the explicit `up/0` and `down/0` pair.
 

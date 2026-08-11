@@ -281,9 +281,9 @@ defmodule Ariadne.Flow.Store.Postgres do
     |> apply_limit(limit)
   end
 
-  defp build_filter_query(filter, %{after_position: after_position, context: context}) do
+  defp build_filter_query(filter, %{after_position: after_position, context: context} = opts) do
     filter
-    |> build_individual_query()
+    |> build_individual_query(opts)
     |> where([e], e.position > ^after_position)
     |> where([e], e.context == ^context)
     |> restrict_to_last_event(filter)
@@ -300,19 +300,28 @@ defmodule Ariadne.Flow.Store.Postgres do
     from(e in subquery(last_event))
   end
 
-  defp build_individual_query(%{types: types, tags: nil}) do
+  defp build_individual_query(%{types: types, tags: nil}, _opts) do
     where(EctoEvent, [e], e.type in ^types)
   end
 
-  defp build_individual_query(%{types: types, tags: tags}) do
+  defp build_individual_query(%{types: types, tags: [tag]}, _opts) do
     EctoEvent
+    |> join(:inner, [e], t in EctoTag, on: t.position == e.position and t.tag == ^tag)
     |> where([e], e.type in ^types)
-    |> where([e], e.position in subquery(positions_carrying_all_tags(tags)))
+    |> select([e], e)
   end
 
-  defp positions_carrying_all_tags(tags) do
+  defp build_individual_query(%{types: types, tags: tags}, opts) do
+    EctoEvent
+    |> where([e], e.type in ^types)
+    |> where([e], e.position in subquery(positions_with_all_tags(tags, types, opts)))
+  end
+
+  defp positions_with_all_tags(tags, types, %{after_position: after_position, context: context}) do
     EctoTag
-    |> where([t], t.tag in ^tags)
+    |> join(:inner, [t], e in EctoEvent, on: e.position == t.position)
+    |> where([t], t.tag in ^tags and t.position > ^after_position)
+    |> where([t, e], e.type in ^types and e.context == ^context)
     |> group_by([t], t.position)
     |> having([t], count(t.tag) == ^length(tags))
     |> select([t], t.position)

@@ -122,6 +122,15 @@ defmodule Ariadne.Flow.Store.Postgres.MigrationTest do
       assert recorded_version() == "1"
     end
 
+    test "removes a store whose recorded version was lost" do
+      install()
+      forget_version()
+
+      migrate(Install, :down)
+
+      for relation <- @tables ++ @views, do: refute(relation_exists?(relation))
+    end
+
     test "removes a store that predates the versioning" do
       install_v01()
       forget_version()

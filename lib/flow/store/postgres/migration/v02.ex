@@ -16,8 +16,8 @@ defmodule Ariadne.Flow.Store.Postgres.Migration.V02 do
   def up(%{prefix: prefix}) do
     Enum.each(@views, fn {view, table} ->
       execute(
-        "CREATE OR REPLACE VIEW #{qualified(prefix, view)} " <>
-          "AS SELECT * FROM #{qualified(prefix, table)}"
+        "CREATE OR REPLACE VIEW #{Migration.qualified(prefix, view)} " <>
+          "AS SELECT * FROM #{Migration.qualified(prefix, table)}"
       )
     end)
   end
@@ -25,9 +25,7 @@ defmodule Ariadne.Flow.Store.Postgres.Migration.V02 do
   @impl Ariadne.Flow.Store.Postgres.Migration.Version
   def down(%{prefix: prefix}) do
     Enum.each(@views, fn {view, _table} ->
-      execute("DROP VIEW IF EXISTS #{qualified(prefix, view)}")
+      execute("DROP VIEW IF EXISTS #{Migration.qualified(prefix, view)}")
     end)
   end
-
-  defp qualified(prefix, relation), do: ~s(#{Migration.quoted(prefix)}."#{relation}")
 end
