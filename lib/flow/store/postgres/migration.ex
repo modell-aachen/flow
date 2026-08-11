@@ -3,7 +3,7 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
   use Ecto.Migration
 
   @initial_version 1
-  @current_version 1
+  @current_version 2
   @default_prefix "public"
   @version_table "modac_flow_store"
 
@@ -51,6 +51,10 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
     |> installed_version()
   end
 
+  @doc false
+  @spec quoted(String.t()) :: String.t()
+  def quoted(identifier), do: ~s("#{String.replace(identifier, ~s("), ~s(""))}")
+
   defp apply_versions(versions, direction, opts) do
     Enum.each(versions, fn version -> apply(version_module(version), direction, [opts]) end)
   end
@@ -75,8 +79,6 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
   defp record_version(%{prefix: prefix}, version) do
     execute(~s(COMMENT ON TABLE #{quoted(prefix)}."#{@version_table}" IS '#{version}'))
   end
-
-  defp quoted(identifier), do: ~s("#{String.replace(identifier, ~s("), ~s(""))}")
 
   defp normalize(opts, default_version) do
     opts

@@ -24,7 +24,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     use Ecto.Schema
 
     @primary_key {:position, :integer, []}
-    schema "modac_flow_store" do
+    schema "ariadne_flow_store" do
       field(:type, :string)
       field(:context, :string)
       field(:data, :map)
@@ -41,7 +41,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     use Ecto.Schema
 
     @primary_key false
-    schema "modac_flow_store_tags" do
+    schema "ariadne_flow_store_tags" do
       field(:position, :integer, primary_key: true)
       field(:tag, :string, primary_key: true)
 
@@ -58,7 +58,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     use Ecto.Schema
 
     @primary_key false
-    schema "modac_flow_store_reactor_checkpoints" do
+    schema "ariadne_flow_store_reactor_checkpoints" do
       field(:context, :string, primary_key: true)
       field(:name, :string, primary_key: true)
       field(:position, :integer)
@@ -306,11 +306,16 @@ defmodule Ariadne.Flow.Store.Postgres do
 
   defp build_individual_query(%{types: types, tags: tags}) do
     EctoEvent
-    |> join(:inner, [e], t in EctoTag, on: t.position == e.position)
-    |> where([e, t], e.type in ^types and t.tag in ^tags)
-    |> group_by([e], e.position)
-    |> having([e, t], count(t.tag) == ^length(tags))
-    |> select([e], e)
+    |> where([e], e.type in ^types)
+    |> where([e], e.position in subquery(positions_carrying_all_tags(tags)))
+  end
+
+  defp positions_carrying_all_tags(tags) do
+    EctoTag
+    |> where([t], t.tag in ^tags)
+    |> group_by([t], t.position)
+    |> having([t], count(t.tag) == ^length(tags))
+    |> select([t], t.position)
   end
 
   defp combine_with_union([first_query | rest_queries]) do
