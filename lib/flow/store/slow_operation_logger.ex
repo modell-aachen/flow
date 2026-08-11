@@ -2,7 +2,7 @@ defmodule Ariadne.Flow.Store.SlowOperationLogger do
   @moduledoc false
   require Logger
 
-  @handler_id "modac-flow-store-slow-operations"
+  @handler_id "ariadne-flow-store-slow-operations"
 
   @default_thresholds [read: 20, append: 100, init_checkpoints: 100]
 

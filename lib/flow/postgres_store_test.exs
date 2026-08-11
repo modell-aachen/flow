@@ -171,14 +171,14 @@ defmodule Ariadne.Flow.PostgresStoreTest do
 
   defp purge(context) do
     positions =
-      Repo.all(from(e in "modac_flow_store", where: e.context == ^context, select: e.position),
+      Repo.all(from(e in "ariadne_flow_store", where: e.context == ^context, select: e.position),
         prefix: @prefix
       )
 
-    delete_all(from(t in "modac_flow_store_tags", where: t.position in ^positions))
-    delete_all(from(e in "modac_flow_store", where: e.context == ^context))
+    delete_all(from(t in "ariadne_flow_store_tags", where: t.position in ^positions))
+    delete_all(from(e in "ariadne_flow_store", where: e.context == ^context))
 
-    delete_all(from(c in "modac_flow_store_reactor_checkpoints", where: c.context == ^context))
+    delete_all(from(c in "ariadne_flow_store_reactor_checkpoints", where: c.context == ^context))
   end
 
   defp delete_all(query), do: Repo.delete_all(query, prefix: @prefix)
