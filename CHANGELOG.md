@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.0](https://github.com/modell-aachen/flow/compare/v0.9.0...v0.10.0) (2026-08-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* Schema version 3 drops the ariadne_* views version 2 created and renames the physical tables modac_flow_store, modac_flow_store_tags and modac_flow_store_reactor_checkpoints to ariadne_*, together with their sequence, indexes and constraints.
+* Filter.new/1 raises ArgumentError on an empty tag list, on a tag list with repeats, and on tags that are not a list.
+
+### Features
+
+* rename the store tables to ariadne_* ([#40](https://github.com/modell-aachen/flow/issues/40)) ([189ad2b](https://github.com/modell-aachen/flow/commit/189ad2bef0373dc4a38a3353885c8950c83f3a98))
+
+
+### Bug Fixes
+
+* reject tag constraints that cannot constrain ([#39](https://github.com/modell-aachen/flow/issues/39)) ([a93e2c8](https://github.com/modell-aachen/flow/commit/a93e2c8b1e509882c2e302852bc510e92dfb77dc))
+
 ## [0.9.0](https://github.com/modell-aachen/flow/compare/v0.8.0...v0.9.0) (2026-08-11)
 
 
