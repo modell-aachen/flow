@@ -3,8 +3,8 @@
 Flow is open source because we think the design is worth reading, forking and
 depending on. It is not open contribution.
 
-We do not merge pull requests from outside the Ariadne team, and a pull request
-opened against this repository is closed automatically. Every line here is owned
+We do not take pull requests from outside the Ariadne team — the repository is
+configured so that only the team can open one. Every line here is owned
 by one legal entity, which is what lets us relicense, ship commercial builds and
 answer provenance questions from customers with a single sentence. Keeping it
 that way while accepting outside patches would mean running a CLA process, and
