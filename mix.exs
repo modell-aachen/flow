@@ -7,6 +7,8 @@ defmodule Flow.MixProject do
       version: "0.6.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      description: "Event sourcing for Elixir with dynamic consistency boundaries",
+      package: package(),
       aliases: aliases(),
       deps: deps(),
       docs: [
@@ -31,6 +33,18 @@ defmodule Flow.MixProject do
 
   def application do
     [extra_applications: [:crypto, :logger]]
+  end
+
+  defp package do
+    [
+      name: "ariadne_flow",
+      licenses: ["Apache-2.0"],
+      files: ~w(lib docs priv mix.exs README.md CHANGELOG.md CONTRIBUTING.md LICENSE NOTICE),
+      links: %{
+        "GitHub" => "https://github.com/modell-aachen/flow",
+        "Legal notice" => "https://www.ariadne.io/en/legal-notice"
+      }
+    ]
   end
 
   defp deps do
