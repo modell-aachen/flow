@@ -13,6 +13,9 @@ rolling deployment can run old and new code against the same rows —
 The guides in [docs/](docs/introduction.md) cover events, event reducers, the
 application, the store, encoders and testing.
 
+Open source, not open contribution — issues are welcome, pull requests are not.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for why.
+
 ## Local Development
 
 `devbox run setup` installs the mix tooling and starts Postgres. Run it after

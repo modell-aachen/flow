@@ -49,14 +49,16 @@ defmodule AriadneFlow.MixProject do
 
   defp package do
     [
-      files: ~w(lib mix.exs .formatter.exs README.md CHANGELOG.md LICENSE),
+      licenses: ["Apache-2.0"],
+      files: ~w(lib mix.exs .formatter.exs README.md CHANGELOG.md CONTRIBUTING.md LICENSE NOTICE),
       exclude_patterns: [
         ~r/_test\.exs$/,
         ~r{^lib/test_helper\.exs$}
       ],
       links: %{
         "GitHub" => @source_url,
-        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md",
+        "Legal notice" => "https://www.ariadne.io/en/legal-notice"
       }
     ]
   end
