@@ -1,20 +1,20 @@
 defmodule Ariadne.Flow.Handoff do
   @moduledoc false
   alias Ariadne.Flow.Reactor
-  alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
+  alias Ariadne.Flow.Scheduler
   alias Ariadne.Flow.Store
 
   require Logger
 
   @enforce_keys [:reactors]
-  defstruct [:reactors, engine: nil, metadata: %{}, nested: false]
+  defstruct [:reactors, scheduler: nil, metadata: %{}, nested: false]
 
   def new(%{reactors: reactors} = attrs) do
     %__MODULE__{
       reactors: reactors,
-      engine: ReactorEngine.normalize(Map.get(attrs, :engine)),
+      scheduler: Scheduler.normalize(Map.get(attrs, :scheduler)),
       metadata: Map.get(attrs, :metadata, %{}),
       nested: Map.get(attrs, :nested, false)
     }
@@ -110,12 +110,12 @@ defmodule Ariadne.Flow.Handoff do
     do: Exception.format(kind, reason, stacktrace)
 
   defp unscheduled([], %__MODULE__{}, %Store{}), do: []
-  defp unscheduled(reactor_runs, %__MODULE__{engine: nil}, %Store{}), do: reactor_runs
+  defp unscheduled(reactor_runs, %__MODULE__{scheduler: nil}, %Store{}), do: reactor_runs
 
-  defp unscheduled(reactor_runs, %__MODULE__{engine: {engine, opts}}, %Store{} = store) do
+  defp unscheduled(reactor_runs, %__MODULE__{scheduler: {scheduler, opts}}, %Store{} = store) do
     scheduled =
       reactor_runs
-      |> engine.schedule(store, opts)
+      |> scheduler.schedule(store, opts)
       |> MapSet.new(&ReactorRun.name/1)
 
     Enum.reject(reactor_runs, &MapSet.member?(scheduled, ReactorRun.name(&1)))

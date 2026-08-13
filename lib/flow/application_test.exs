@@ -7,9 +7,9 @@ defmodule Ariadne.Flow.ApplicationTest do
   alias Ariadne.Flow.Composite
   alias Ariadne.Flow.PostCommitError
   alias Ariadne.Flow.Projection
-  alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
+  alias Ariadne.Flow.Scheduler
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Test.Repo
   alias Ecto.Adapters.SQL.Sandbox
@@ -19,14 +19,14 @@ defmodule Ariadne.Flow.ApplicationTest do
   @moduletag capture_log: true
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
   end
 
   defmodule OtherEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct []
 
     def tags(_), do: []
@@ -171,10 +171,10 @@ defmodule Ariadne.Flow.ApplicationTest do
   # A scheduler that reports every run as durably enqueued and hands it to another process
   # after a delay, standing in for a job system. `delay: :never` is the job row that is
   # written but never picked up — what Flow's own execution is not allowed to substitute for.
-  defmodule SchedulingEngine do
-    @behaviour ReactorEngine
+  defmodule ClaimingScheduler do
+    @behaviour Scheduler
 
-    @impl ReactorEngine
+    @impl Scheduler
     def schedule(reactor_runs, store, opts) do
       send(self(), {:scheduled, reactor_runs, store, opts})
 
@@ -185,8 +185,13 @@ defmodule Ariadne.Flow.ApplicationTest do
 
     defp defer(_reactor_run, _store, :never), do: :ok
 
+    # The worker is where the reactor handler runs, so it is the process that has to
+    # know the inbox the module reactors report to.
     defp defer(reactor_run, store, delay) do
+      inbox = Process.get(:inbox)
+
       spawn(fn ->
+        Process.put(:inbox, inbox)
         Process.sleep(delay)
         ReactorRun.execute(reactor_run, store)
       end)
@@ -243,18 +248,12 @@ defmodule Ariadne.Flow.ApplicationTest do
     Store.Postgres.init(repo: Repo, prefix: "postgres_store_test_schema")
   end
 
-  # An InMemory store whose agent process knows the test pid, so module reactors
-  # (whose handlers run inside that agent) can report back via Process.get(:inbox).
+  # Module reactors cannot close over the test pid, so they report back through the
+  # :inbox of the process their handler runs in — the one driving the store.
   defp inbox_store do
-    store = Store.InMemory.init()
-    test_pid = self()
+    Process.put(:inbox, self())
 
-    Agent.update(store.config, fn state ->
-      Process.put(:inbox, test_pid)
-      state
-    end)
-
-    store
+    Store.InMemory.init()
   end
 
   # Appending from inside the decide function lands between the command's read and
@@ -291,25 +290,25 @@ defmodule Ariadne.Flow.ApplicationTest do
                Application.new(%{store: store, reactors: [CountsReactor]})
     end
 
-    test "defaults reactors to an empty list and to no engine at all" do
+    test "defaults reactors to an empty list and to no scheduler at all" do
       store = Store.InMemory.init()
 
-      assert %Application{store: ^store, reactors: [], engine: nil} =
+      assert %Application{store: ^store, reactors: [], scheduler: nil} =
                Application.new(%{store: store})
     end
 
-    test "normalizes a bare engine module to a {module, opts} pair" do
+    test "normalizes a bare scheduler module to a {module, opts} pair" do
       store = Store.InMemory.init()
 
-      assert %Application{engine: {SchedulingEngine, []}} =
-               Application.new(%{store: store, engine: SchedulingEngine})
+      assert %Application{scheduler: {ClaimingScheduler, []}} =
+               Application.new(%{store: store, scheduler: ClaimingScheduler})
     end
 
-    test "keeps an explicit {module, opts} engine" do
+    test "keeps an explicit {module, opts} scheduler" do
       store = Store.InMemory.init()
 
-      assert %Application{engine: {SchedulingEngine, [foo: :bar]}} =
-               Application.new(%{store: store, engine: {SchedulingEngine, foo: :bar}})
+      assert %Application{scheduler: {ClaimingScheduler, [foo: :bar]}} =
+               Application.new(%{store: store, scheduler: {ClaimingScheduler, foo: :bar}})
     end
 
     # Two reactors under one name share a checkpoint, so each would consume events the
@@ -375,15 +374,15 @@ defmodule Ariadne.Flow.ApplicationTest do
 
       assert {:ok, _} = Application.dispatch(application, count_command(1))
 
-      assert %{events: [%{event: %Store.Event{data: %{"count" => 1}}}]} = Store.read(store)
+      assert %{events: [%{record: %Store.Record{data: %{"count" => 1}}}]} = Store.read(store)
     end
 
-    test "hands the engine every run at once, with the dispatch metadata on each" do
+    test "hands the scheduler every run at once, with the dispatch metadata on each" do
       application =
         Application.new(%{
           store: Store.InMemory.init(),
           reactors: [CountsReactor, HistoryReactor],
-          engine: {SchedulingEngine, foo: :bar}
+          scheduler: {ClaimingScheduler, foo: :bar}
         })
 
       assert {:ok, _} = Application.dispatch(application, count_command(1))
@@ -413,7 +412,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
                Application.dispatch(application, count_command(1))
 
-      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
+      assert %{events: [%{record: %Store.Record{}}]} = Store.read(store)
     end
 
     test "keeps the command's events when an async reactor raises" do
@@ -423,7 +422,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
                Application.dispatch(application, count_command(1))
 
-      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
+      assert %{events: [%{record: %Store.Record{}}]} = Store.read(store)
     end
 
     test "logs the failure and says the reactor will get another run" do
@@ -530,7 +529,7 @@ defmodule Ariadne.Flow.ApplicationTest do
                  )
                end)
 
-      assert %{events: [%{event: %Store.Event{data: %{"count" => 1}}}]} = Store.read(store)
+      assert %{events: [%{record: %Store.Record{data: %{"count" => 1}}}]} = Store.read(store)
     end
   end
 
@@ -622,7 +621,7 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{
           store: inbox_store(),
           reactors: [SyncCountsReactor],
-          engine: {SchedulingEngine, delay: 20}
+          scheduler: {ClaimingScheduler, delay: 20}
         })
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
@@ -631,7 +630,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
-    # With no engine there is nothing to poll for: Flow ran the reactor itself before the
+    # With no scheduler there is nothing to poll for: Flow ran the reactor itself before the
     # wait began, so the first look at the checkpoint confirms.
     test "confirms without polling delay when Flow ran the reactor itself" do
       application = Application.new(%{store: inbox_store(), reactors: [SyncCountsReactor]})
@@ -646,7 +645,7 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{
           store: inbox_store(),
           reactors: [SyncCountsReactor],
-          engine: SchedulingEngine
+          scheduler: ClaimingScheduler
         })
 
       error =
@@ -667,21 +666,25 @@ defmodule Ariadne.Flow.ApplicationTest do
       store = inbox_store()
 
       application =
-        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: SchedulingEngine})
+        Application.new(%{
+          store: store,
+          reactors: [SyncCountsReactor],
+          scheduler: ClaimingScheduler
+        })
 
       assert_raise PostCommitError, fn ->
         Application.dispatch(application, count_command(1), await_timeout: 50)
       end
 
-      assert %{events: [%{event: %Store.Event{}}]} = Store.read(store)
+      assert %{events: [%{record: %Store.Record{}}]} = Store.read(store)
     end
 
-    test "does not await an async reactor the engine scheduled" do
+    test "does not await an async reactor the scheduler scheduled" do
       application =
         Application.new(%{
           store: inbox_store(),
           reactors: [CountsReactor],
-          engine: SchedulingEngine
+          scheduler: ClaimingScheduler
         })
 
       assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 0)
@@ -734,7 +737,7 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{
           store: inbox_store(),
           reactors: [BoomSyncReactor],
-          engine: SchedulingEngine
+          scheduler: ClaimingScheduler
         })
 
       assert_raise PostCommitError, ~r/did not catch up/, fn ->
@@ -757,14 +760,14 @@ defmodule Ariadne.Flow.ApplicationTest do
   end
 
   describe "dispatch/3 nested in an outer transaction" do
-    test "never offers a sync run to the engine, running it itself instead" do
+    test "never offers a sync run to the scheduler, running it itself instead" do
       store = inbox_store()
 
       application =
         Application.new(%{
           store: store,
           reactors: [SyncCountsReactor, CountsReactor],
-          engine: SchedulingEngine
+          scheduler: ClaimingScheduler
         })
 
       Store.transaction(store, fn ->
@@ -779,7 +782,11 @@ defmodule Ariadne.Flow.ApplicationTest do
       store = inbox_store()
 
       application =
-        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: SchedulingEngine})
+        Application.new(%{
+          store: store,
+          reactors: [SyncCountsReactor],
+          scheduler: ClaimingScheduler
+        })
 
       assert {:ok, %{events: [%{event: %CountEvent{count: 1}}]}} =
                Store.transaction(store, fn ->
@@ -793,7 +800,11 @@ defmodule Ariadne.Flow.ApplicationTest do
       store = postgres_store()
 
       application =
-        Application.new(%{store: store, reactors: [SyncCountsReactor], engine: SchedulingEngine})
+        Application.new(%{
+          store: store,
+          reactors: [SyncCountsReactor],
+          scheduler: ClaimingScheduler
+        })
 
       assert {:ok, _} =
                Repo.transaction(fn ->
@@ -803,7 +814,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
     end
 
-    # Its work lands after the outer commit either way — through the job row the engine
+    # Its work lands after the outer commit either way — through the job row the scheduler
     # wrote inside that transaction, or through the next dispatch or catch-up.
     test "leaves an async reactor to whatever runs after the outer commit" do
       store = inbox_store()
@@ -862,7 +873,7 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{
           store: store,
           reactors: [SyncCountsReactor],
-          engine: SchedulingEngine
+          scheduler: ClaimingScheduler
         })
 
       assert_raise PostCommitError, fn ->
@@ -920,7 +931,7 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{
           store: inbox_store(),
           reactors: [SyncCountsReactor],
-          engine: SchedulingEngine
+          scheduler: ClaimingScheduler
         })
 
       assert_raise PostCommitError, ~r/never re-dispatch/, fn ->
@@ -975,13 +986,13 @@ defmodule Ariadne.Flow.ApplicationTest do
                Application.catch_up(application)
     end
 
-    test "offers its runs to the engine, carrying the metadata it was given" do
+    test "offers its runs to the scheduler, carrying the metadata it was given" do
       store = inbox_store()
       writer = Application.new(%{store: store})
       {:ok, _} = Application.dispatch(writer, count_command(1))
 
       application =
-        Application.new(%{store: store, reactors: [HistoryReactor], engine: SchedulingEngine})
+        Application.new(%{store: store, reactors: [HistoryReactor], scheduler: ClaimingScheduler})
 
       assert :ok = Application.catch_up(application, metadata: %{"trace_id" => "abc123"})
 

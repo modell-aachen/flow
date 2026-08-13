@@ -4,10 +4,12 @@ defmodule Ariadne.Flow.Store.InMemory do
 
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Backend
+  alias Ariadne.Flow.Store.Consumption
   alias Ariadne.Flow.Store.InMemory.State
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @batch_size 100
+  @unlocked :"$ariadne_flow_consume_unlocked"
 
   @doc """
   Starts an empty store, linked to the calling process. It takes no options.
@@ -41,11 +43,23 @@ defmodule Ariadne.Flow.Store.InMemory do
     Agent.get(agent, &State.count/1)
   end
 
+  # The handler runs in the calling process rather than in the agent callback, so it can
+  # reach the store it is consuming from — read it, append to it, dispatch into it. The
+  # per-reactor lock around it is the in-memory equivalent of the advisory lock the
+  # Postgres backend holds for the length of its consume transaction.
   @impl Backend
-  def consume(agent, %StoredEventReactor{} = reactor) do
-    Agent.get_and_update(agent, fn state ->
-      {new_state, result} = State.consume(state, reactor, @batch_size)
-      {result, new_state}
+  def consume(agent, %StoredEventReactor{name: name, handler: handler} = reactor) do
+    holding_consume_lock(agent, name, fn ->
+      transaction(agent, fn ->
+        {prior_position, events} =
+          Agent.get(agent, &State.unconsumed(&1, reactor, @batch_size + 1))
+
+        {batch, more_in_store?} = Consumption.split(events, @batch_size)
+        {result, new_position} = Consumption.run(batch, prior_position, more_in_store?, handler)
+        Agent.update(agent, &State.put_checkpoint(&1, name, new_position))
+
+        result
+      end)
     end)
   end
 
@@ -73,7 +87,7 @@ defmodule Ariadne.Flow.Store.InMemory do
   def telemetry_metadata(_agent), do: %{}
 
   # The store's serialized form is the agent itself, so it round-trips only within
-  # the same node — for in-process engines, not for handing a store to another node.
+  # the same node — for in-process schedulers, not for handing a store to another node.
   @impl Backend
   def dump(agent), do: agent
 
@@ -88,12 +102,61 @@ defmodule Ariadne.Flow.Store.InMemory do
       fun.()
     catch
       kind, reason ->
-        Agent.update(agent, fn _state -> snapshot end)
+        Agent.update(agent, &State.restore(snapshot, &1))
         :erlang.raise(kind, reason, __STACKTRACE__)
     after
       Process.delete(transaction_key(agent))
     end
   end
+
+  # Held per reactor name, and re-entered rather than waited on by the process already
+  # holding it — a handler consuming its own reactor again would otherwise wait forever.
+  defp holding_consume_lock(agent, name, fun) do
+    key = consume_lock_key(agent, name)
+
+    if Process.get(key, false) do
+      fun.()
+    else
+      lock_consume(agent, name)
+      Process.put(key, true)
+
+      try do
+        fun.()
+      after
+        Process.delete(key)
+        unlock_consume(agent, name)
+      end
+    end
+  end
+
+  defp lock_consume(agent, name) do
+    # The callback runs in the agent, so the process taking the lock has to be named here.
+    caller = self()
+
+    case Agent.get_and_update(agent, &State.lock_consume(&1, name, caller)) do
+      :ok ->
+        :ok
+
+      {:wait, holder} ->
+        await_unlock(agent, name, Process.monitor(holder))
+        lock_consume(agent, name)
+    end
+  end
+
+  defp await_unlock(agent, name, monitor_ref) do
+    receive do
+      {@unlocked, ^agent, ^name} -> Process.demonitor(monitor_ref, [:flush])
+      {:DOWN, ^monitor_ref, :process, _holder, _reason} -> :ok
+    end
+  end
+
+  defp unlock_consume(agent, name) do
+    agent
+    |> Agent.get_and_update(&State.unlock_consume(&1, name))
+    |> Enum.each(&send(&1, {@unlocked, agent, name}))
+  end
+
+  defp consume_lock_key(agent, name), do: {__MODULE__, :consume, agent, name}
 
   defp transaction_key(agent), do: {__MODULE__, :transaction, agent}
 end

@@ -1,17 +1,17 @@
 defmodule Ariadne.Flow.ReactorTest do
   use Ariadne.Flow.Test.Gwt, async: true
-  alias Ariadne.Flow.Query
+  alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Reactor
 
   defmodule ExampleEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct [:id]
 
     def tags(%{id: id}), do: ["thing:#{id}"]
   end
 
   defmodule UnrelatedEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct []
 
     def tags(_), do: []
@@ -125,25 +125,25 @@ defmodule Ariadne.Flow.ReactorTest do
     assert %Reactor{sync: true} = reactor
   end
 
-  test "query/1 exposes the filter as a Query.Item list holding serialized types" do
+  test "query/1 exposes the filter as a one-element list holding serialized types" do
     reactor =
       Reactor.new(
         %{name: "example", filter: %{types: [ExampleEvent], tags: ["thing:1"]}},
         fn _, _ -> :ok end
       )
 
-    assert [%Query.Item{types: ["Ariadne.Flow.ReactorTest.ExampleEvent"], tags: ["thing:1"]}] =
+    assert [%Filter{types: ["Ariadne.Flow.ReactorTest.ExampleEvent"], tags: ["thing:1"]}] =
              Reactor.query(reactor)
   end
 
-  test "new/2 validates the filter via Query.Item" do
-    assert_raise RuntimeError, fn ->
+  test "new/2 validates the filter" do
+    assert_raise ArgumentError, ~r/non-empty list/, fn ->
       Reactor.new(%{name: "example", filter: %{types: []}}, fn _, _ -> :ok end)
     end
   end
 
   test "new/2 rejects a filter asking for only the last event" do
-    assert_raise RuntimeError, ~r/only_last_event/, fn ->
+    assert_raise ArgumentError, ~r/only_last_event/, fn ->
       Reactor.new(
         %{name: "example", filter: %{types: [ExampleEvent], only_last_event: true}},
         fn _, _ -> :ok end

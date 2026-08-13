@@ -1,10 +1,10 @@
 defmodule Ariadne.Flow.ProjectionTest do
   use Ariadne.Flow.Test.Gwt, async: true
+  alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Projection
-  alias Ariadne.Flow.Query
 
   defmodule ExampleEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 0
 
     def tags(%{count: count}) do
@@ -13,7 +13,7 @@ defmodule Ariadne.Flow.ProjectionTest do
   end
 
   defmodule ExampleEvent2 do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct []
 
     def tags(_) do
@@ -133,6 +133,6 @@ defmodule Ariadne.Flow.ProjectionTest do
         fn state, _, _ -> state end
       )
 
-    assert [%Query.Item{}] = Projection.query(projection)
+    assert [%Filter{}] = Projection.query(projection)
   end
 end

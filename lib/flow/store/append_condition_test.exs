@@ -1,13 +1,14 @@
 defmodule Ariadne.Flow.Store.AppendConditionTest do
   use ExUnit.Case, async: true
+  alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.AppendCondition
-  alias Ariadne.Flow.Store.Event
+  alias Ariadne.Flow.Store.Record
 
   test "new/1 normalises a raw condition and defaults the position to append after" do
     assert %AppendCondition{
-             fail_if_events_match: %Query{items: [%Query.Item{types: ["ItemAdded"]}]},
+             fail_if_events_match: %Query{filters: [%Filter{types: ["ItemAdded"]}]},
              after: 0
            } = AppendCondition.new(%{fail_if_events_match: [%{types: ["ItemAdded"]}]})
   end
@@ -19,7 +20,9 @@ defmodule Ariadne.Flow.Store.AppendConditionTest do
   end
 
   test "new/1 rejects anything that is not a condition" do
-    assert_raise RuntimeError, fn -> AppendCondition.new(%{after: 1}) end
+    assert_raise ArgumentError, ~r/fail_if_events_match/, fn ->
+      AppendCondition.new(%{after: 1})
+    end
   end
 
   test "for_read/1 conflicts on the read's own query after the last position it saw" do
@@ -32,7 +35,7 @@ defmodule Ariadne.Flow.Store.AppendConditionTest do
   test "for_read/1 conflicts on the whole store when the read saw nothing" do
     read = Store.read(Store.InMemory.init())
 
-    assert %AppendCondition{fail_if_events_match: %Query{items: :all}, after: 0} ==
+    assert %AppendCondition{fail_if_events_match: %Query{filters: :all}, after: 0} ==
              AppendCondition.for_read(read)
   end
 
@@ -42,5 +45,5 @@ defmodule Ariadne.Flow.Store.AppendConditionTest do
     store
   end
 
-  defp item_added, do: %Event{type: "ItemAdded", data: %{}, tags: []}
+  defp item_added, do: %Record{type: "ItemAdded", data: %{}, tags: []}
 end

@@ -1,12 +1,12 @@
 defmodule Ariadne.Flow.CommandHandler do
   @moduledoc false
   alias Ariadne.Flow.AppendConditionError
+  alias Ariadne.Flow.Event
+  alias Ariadne.Flow.Event.Codec
+  alias Ariadne.Flow.Event.Type
   alias Ariadne.Flow.EventReducer
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.AppendCondition
-  alias Ariadne.Flow.Store.Event.Codec
-  alias Ariadne.Flow.Store.Event.Encoder
-  alias Ariadne.Flow.Store.Event.Type
 
   @enforce_keys [:command]
   defstruct [:command, metadata: %{}, created_at: nil]
@@ -49,9 +49,9 @@ defmodule Ariadne.Flow.CommandHandler do
   end
 
   defp serialize(%type{} = event) do
-    %{tags: tags, data: data} = Encoder.encode(event)
+    %{tags: tags, data: data} = Event.encode(event)
 
-    %Store.Event{
+    %Store.Record{
       type: Type.of(type),
       data: data,
       tags: tags

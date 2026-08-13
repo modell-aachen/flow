@@ -5,7 +5,7 @@ defmodule Ariadne.Flow.EventReducerTest do
   alias Ariadne.Flow.Store
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
@@ -26,7 +26,7 @@ defmodule Ariadne.Flow.EventReducerTest do
   end
 
   defp count_event(count) do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.EventReducerTest.CountEvent",
       data: %{"count" => count},
       tags: []
@@ -52,8 +52,8 @@ defmodule Ariadne.Flow.EventReducerTest do
 
       assert %{
                read: %Store.Read{
-                 query: %{items: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}]},
-                 events: [%Store.SequencedEvent{position: 1}],
+                 query: %{filters: [%{types: ["Ariadne.Flow.EventReducerTest.CountEvent"]}]},
+                 events: [%Store.SequencedRecord{position: 1}],
                  last_position: 1
                }
              } = EventReducer.evaluate(num_counts_projection(), store)
@@ -67,8 +67,8 @@ defmodule Ariadne.Flow.EventReducerTest do
       assert %{
                result: 2,
                read: %Store.Read{
-                 query: %{items: [%{only_last_event: true}]},
-                 events: [%Store.SequencedEvent{position: 2}]
+                 query: %{filters: [%{only_last_event: true}]},
+                 events: [%Store.SequencedRecord{position: 2}]
                }
              } = EventReducer.evaluate(last_count_projection(), store)
     end

@@ -76,7 +76,7 @@ gwt "subscribe_student" do
 end
 ```
 
-Use `ok` and `err` whenever the reducer returns a tagged tuple — commands are the typical case, since their `map_fn` returns `{:ok, events}` or `{:error, reason}`.
+Use `ok` and `err` whenever the reducer returns a tagged tuple — commands are the typical case, since their `mapper` returns `{:ok, events}` or `{:error, reason}`.
 
 ## Supplying metadata
 
@@ -85,6 +85,8 @@ When a reducer's handler reads from the `metadata` argument, the test needs to c
 - Plain event structs (`%CourseDefined{...}`) — the DSL wraps each in an envelope with `metadata: %{created_at: ~U[2000-01-01 12:00:00Z]}` automatically. Use this form when the handler ignores metadata.
 - Pre-wrapped sequenced events (`%{event: ..., metadata: %{...}}`) — the metadata is kept as given. Use this form when the handler reads metadata fields, for example a custom timestamp, a user id, or a trace id.
 
-Either way the DSL builds the same envelope an event read from the store arrives in: the decoded event and its metadata, plus the stored type and tags the reducer's filter matches against.
+Either way the DSL builds the same `Ariadne.Flow.Envelope` an event read from the store arrives in: the decoded event and its metadata, plus the stored type and tags the reducer's filter matches against. It also fills in the `:position` a store would have assigned, numbering the given events from 1 in the order you list them, so a handler that reads `metadata.position` can be tested without a store. Pass your own `:position` to override it.
+
+An `%Ariadne.Flow.Envelope{}` passes through `given` untouched. That is the form to use when the point of the test is an event stored under a type its module no longer carries — building it by hand keeps the stored `type` and `tags` out of the current encoder's hands.
 
 Each given event still passes through the reducer's filter just like an event read from the store, so only events whose types and tags match will affect the result.

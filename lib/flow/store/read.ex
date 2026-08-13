@@ -1,14 +1,14 @@
 defmodule Ariadne.Flow.Store.Read do
   @moduledoc false
   alias Ariadne.Flow.Query
-  alias Ariadne.Flow.Store.SequencedEvent
+  alias Ariadne.Flow.Store.SequencedRecord
 
   @enforce_keys [:query, :events, :last_position]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           query: Query.t(),
-          events: [SequencedEvent.t()],
+          events: [SequencedRecord.t()],
           last_position: non_neg_integer()
         }
 

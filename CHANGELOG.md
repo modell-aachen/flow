@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.10.0](https://github.com/modell-aachen/flow/compare/v0.9.0...v0.10.0) (2026-08-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* Schema version 3 drops the ariadne_* views version 2 created and renames the physical tables modac_flow_store, modac_flow_store_tags and modac_flow_store_reactor_checkpoints to ariadne_*, together with their sequence, indexes and constraints.
+* Filter.new/1 raises ArgumentError on an empty tag list, on a tag list with repeats, and on tags that are not a list.
+
+### Features
+
+* rename the store tables to ariadne_* ([#40](https://github.com/modell-aachen/flow/issues/40)) ([189ad2b](https://github.com/modell-aachen/flow/commit/189ad2bef0373dc4a38a3353885c8950c83f3a98))
+
+
+### Bug Fixes
+
+* reject tag constraints that cannot constrain ([#39](https://github.com/modell-aachen/flow/issues/39)) ([a93e2c8](https://github.com/modell-aachen/flow/commit/a93e2c8b1e509882c2e302852bc510e92dfb77dc))
+
+## [0.9.0](https://github.com/modell-aachen/flow/compare/v0.8.0...v0.9.0) (2026-08-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* read the store through ariadne_* views ([#38](https://github.com/modell-aachen/flow/issues/38))
+
+### Features
+
+* read the store through ariadne_* views ([#38](https://github.com/modell-aachen/flow/issues/38)) ([326a804](https://github.com/modell-aachen/flow/commit/326a804e9dcf9359477bd9ca2455c381b2a048e0))
+
+
+### Bug Fixes
+
+* run InMemory reactor handlers outside the agent ([#36](https://github.com/modell-aachen/flow/issues/36)) ([7af4fd2](https://github.com/modell-aachen/flow/commit/7af4fd28dfda3f0f58d44640d7104976a992f554))
+
+## [0.8.0](https://github.com/modell-aachen/flow/compare/v0.7.0...v0.8.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename misleading public names ([#35](https://github.com/modell-aachen/flow/issues/35))
+* raise ArgumentError on bad construction ([#33](https://github.com/modell-aachen/flow/issues/33))
+
+### Features
+
+* rename misleading public names ([#35](https://github.com/modell-aachen/flow/issues/35)) ([16201bc](https://github.com/modell-aachen/flow/commit/16201bcb0e542beea3ae2f6dbf5451f1697d7482))
+
+
+### Refactors
+
+* raise ArgumentError on bad construction ([#33](https://github.com/modell-aachen/flow/issues/33)) ([c2bbec6](https://github.com/modell-aachen/flow/commit/c2bbec6eb6c7bb7ca077375a1f1e71e10040de5d))
+
+## [0.7.0](https://github.com/modell-aachen/flow/compare/v0.6.0...v0.7.0) (2026-08-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* `Store.Postgres.Migration.run/1` is replaced by `up/1` and `down/1`, which take a keyword list instead of a positional prefix. Rewrite the existing store migration in place:
+* split dev tooling into dev/ ([#31](https://github.com/modell-aachen/flow/issues/31))
+* rename the OTP app to :ariadne_flow ([#29](https://github.com/modell-aachen/flow/issues/29))
+* the event envelope is a struct ([#27](https://github.com/modell-aachen/flow/issues/27))
+
+### Features
+
+* rename the OTP app to :ariadne_flow ([#29](https://github.com/modell-aachen/flow/issues/29)) ([95d4e32](https://github.com/modell-aachen/flow/commit/95d4e32e0fa2ecb1ca785f4ded343135b26284f7))
+* split dev tooling into dev/ ([#31](https://github.com/modell-aachen/flow/issues/31)) ([622e249](https://github.com/modell-aachen/flow/commit/622e2491db27999ac36abd24dc23b2bf18481b67))
+* the event envelope is a struct ([#27](https://github.com/modell-aachen/flow/issues/27)) ([8e329b7](https://github.com/modell-aachen/flow/commit/8e329b756a6ea4139fa8ce8f1371750dafeb924c))
+* versioned store migrations ([#32](https://github.com/modell-aachen/flow/issues/32)) ([d4bed65](https://github.com/modell-aachen/flow/commit/d4bed65e06aca0776131f8a19a128f379677c2b3))
+
+
+### Bug Fixes
+
+* scope credo to dev/test, add Hex metadata ([#30](https://github.com/modell-aachen/flow/issues/30)) ([0b929f5](https://github.com/modell-aachen/flow/commit/0b929f52da1dffbe48727448e3fbf228a3027772))
+
 ## [0.6.0](https://github.com/modell-aachen/flow/compare/v0.5.1...v0.6.0) (2026-08-07)
 
 

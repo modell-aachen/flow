@@ -4,11 +4,11 @@ defmodule Ariadne.Flow.Store.Postgres do
 
   import Ecto.Query
 
-  alias Ariadne.Flow.ConsumeResult
   alias Ariadne.Flow.Query
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.Backend
-  alias Ariadne.Flow.Store.SequencedEvent
+  alias Ariadne.Flow.Store.Consumption
+  alias Ariadne.Flow.Store.SequencedRecord
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @enforce_keys [:repo, :prefix, :context]
@@ -24,7 +24,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     use Ecto.Schema
 
     @primary_key {:position, :integer, []}
-    schema "modac_flow_store" do
+    schema "ariadne_flow_store" do
       field(:type, :string)
       field(:context, :string)
       field(:data, :map)
@@ -41,7 +41,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     use Ecto.Schema
 
     @primary_key false
-    schema "modac_flow_store_tags" do
+    schema "ariadne_flow_store_tags" do
       field(:position, :integer, primary_key: true)
       field(:tag, :string, primary_key: true)
 
@@ -58,7 +58,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     use Ecto.Schema
 
     @primary_key false
-    schema "modac_flow_store_reactor_checkpoints" do
+    schema "ariadne_flow_store_reactor_checkpoints" do
       field(:context, :string, primary_key: true)
       field(:name, :string, primary_key: true)
       field(:position, :integer)
@@ -87,7 +87,7 @@ defmodule Ariadne.Flow.Store.Postgres do
   end
 
   @impl Backend
-  def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, %Query{items: :all}, opts) do
+  def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, %Query{filters: :all}, opts) do
     after_position = Keyword.get(opts, :after, 0)
     limit = Keyword.get(opts, :limit)
 
@@ -97,24 +97,28 @@ defmodule Ariadne.Flow.Store.Postgres do
       |> order_by([e], e.position)
       |> apply_limit(limit)
       |> repo.all(prefix: prefix)
-      |> Enum.map(&to_sequenced_event/1)
+      |> Enum.map(&to_sequenced_record/1)
 
     %{events: events}
   end
 
-  def read(%__MODULE__{}, %Query{items: []}, _opts) do
+  def read(%__MODULE__{}, %Query{filters: []}, _opts) do
     %{events: []}
   end
 
-  def read(%__MODULE__{repo: repo, prefix: prefix, context: context}, %Query{items: items}, opts) do
+  def read(
+        %__MODULE__{repo: repo, prefix: prefix, context: context},
+        %Query{filters: filters},
+        opts
+      ) do
     after_position = Keyword.get(opts, :after, 0)
     limit = Keyword.get(opts, :limit)
 
     events =
-      items
+      filters
       |> to_ecto_query(%{after_position: after_position, context: context, limit: limit})
       |> repo.all(prefix: prefix)
-      |> Enum.map(&to_sequenced_event/1)
+      |> Enum.map(&to_sequenced_record/1)
 
     %{events: events}
   end
@@ -141,7 +145,7 @@ defmodule Ariadne.Flow.Store.Postgres do
 
           repo.insert_all(EctoTag, tag_entries, prefix: prefix)
 
-          {:ok, %{events: Enum.map(inserted_events, &to_sequenced_event/1)}}
+          {:ok, %{events: Enum.map(inserted_events, &to_sequenced_record/1)}}
         else
           {:error, :append_condition_failed}
         end
@@ -150,7 +154,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     result
   end
 
-  def append(%__MODULE__{} = config, %Store.Event{} = event, opts),
+  def append(%__MODULE__{} = config, %Store.Record{} = event, opts),
     do: append(config, [event], opts)
 
   @impl Backend
@@ -174,12 +178,8 @@ defmodule Ariadne.Flow.Store.Postgres do
 
         %{events: events} = read(config, query, after: prior_position, limit: @batch_size + 1)
 
-        {batch, more_in_store?} =
-          if length(events) > @batch_size,
-            do: {Enum.take(events, @batch_size), true},
-            else: {events, false}
-
-        {result, new_position} = build_result(batch, prior_position, more_in_store?, handler)
+        {batch, more_in_store?} = Consumption.split(events, @batch_size)
+        {result, new_position} = Consumption.run(batch, prior_position, more_in_store?, handler)
         write_checkpoint_position(config, name, new_position)
         result
       end)
@@ -247,34 +247,6 @@ defmodule Ariadne.Flow.Store.Postgres do
     key
   end
 
-  defp build_result(batch, prior_position, more_in_store?, handler) do
-    case handler.(batch) do
-      {:ok, count} ->
-        new_position = position_after(batch, count, prior_position)
-
-        {%ConsumeResult{
-           status: :ok,
-           processed: count,
-           last_position: new_position,
-           more?: more_in_store?
-         }, new_position}
-
-      {:error, count, failure} ->
-        new_position = position_after(batch, count, prior_position)
-
-        {%ConsumeResult{
-           status: :error,
-           processed: count,
-           last_position: new_position,
-           more?: false,
-           failure: failure
-         }, new_position}
-    end
-  end
-
-  defp position_after(_batch, 0, prior_position), do: prior_position
-  defp position_after(batch, count, _prior) when count > 0, do: Enum.at(batch, count - 1).position
-
   defp write_checkpoint_position(
          %__MODULE__{repo: repo, prefix: prefix, context: context},
          name,
@@ -289,10 +261,10 @@ defmodule Ariadne.Flow.Store.Postgres do
     )
   end
 
-  defp to_sequenced_event(%EctoEvent{} = event) do
-    %SequencedEvent{
+  defp to_sequenced_record(%EctoEvent{} = event) do
+    %SequencedRecord{
       created_at: event.created_at,
-      event: %Store.Event{
+      record: %Store.Record{
         type: event.type,
         data: event.data,
         tags: event.tags
@@ -302,19 +274,19 @@ defmodule Ariadne.Flow.Store.Postgres do
     }
   end
 
-  defp to_ecto_query(query_items, %{limit: limit} = opts) do
-    query_items
-    |> Enum.map(&build_item_query(&1, opts))
+  defp to_ecto_query(filters, %{limit: limit} = opts) do
+    filters
+    |> Enum.map(&build_filter_query(&1, opts))
     |> combine_with_union()
     |> apply_limit(limit)
   end
 
-  defp build_item_query(item, %{after_position: after_position, context: context}) do
-    item
-    |> build_individual_query()
+  defp build_filter_query(filter, %{after_position: after_position, context: context} = opts) do
+    filter
+    |> build_individual_query(opts)
     |> where([e], e.position > ^after_position)
     |> where([e], e.context == ^context)
-    |> restrict_to_last_event(item)
+    |> restrict_to_last_event(filter)
   end
 
   defp restrict_to_last_event(query, %{only_last_event: false}), do: query
@@ -328,17 +300,31 @@ defmodule Ariadne.Flow.Store.Postgres do
     from(e in subquery(last_event))
   end
 
-  defp build_individual_query(%{types: types, tags: nil}) do
+  defp build_individual_query(%{types: types, tags: nil}, _opts) do
     where(EctoEvent, [e], e.type in ^types)
   end
 
-  defp build_individual_query(%{types: types, tags: tags}) do
+  defp build_individual_query(%{types: types, tags: [tag]}, _opts) do
     EctoEvent
-    |> join(:inner, [e], t in EctoTag, on: t.position == e.position)
-    |> where([e, t], e.type in ^types and t.tag in ^tags)
-    |> group_by([e], e.position)
-    |> having([e, t], count(t.tag) == ^length(tags))
+    |> join(:inner, [e], t in EctoTag, on: t.position == e.position and t.tag == ^tag)
+    |> where([e], e.type in ^types)
     |> select([e], e)
+  end
+
+  defp build_individual_query(%{types: types, tags: tags}, opts) do
+    EctoEvent
+    |> where([e], e.type in ^types)
+    |> where([e], e.position in subquery(positions_with_all_tags(tags, types, opts)))
+  end
+
+  defp positions_with_all_tags(tags, types, %{after_position: after_position, context: context}) do
+    EctoTag
+    |> join(:inner, [t], e in EctoEvent, on: e.position == t.position)
+    |> where([t], t.tag in ^tags and t.position > ^after_position)
+    |> where([t, e], e.type in ^types and e.context == ^context)
+    |> group_by([t], t.position)
+    |> having([t], count(t.tag) == ^length(tags))
+    |> select([t], t.position)
   end
 
   defp combine_with_union([first_query | rest_queries]) do
@@ -389,7 +375,7 @@ defmodule Ariadne.Flow.Store.Postgres do
     |> Enum.empty?()
   end
 
-  defp map_to_ecto(%__MODULE__{context: context}, %Store.Event{} = event, opts) do
+  defp map_to_ecto(%__MODULE__{context: context}, %Store.Record{} = event, opts) do
     created_at = Keyword.get(opts, :created_at, DateTime.utc_now())
     metadata = Keyword.get(opts, :metadata, %{})
 

@@ -5,14 +5,14 @@ defmodule Ariadne.Flow.ReactorRunTest do
   alias Ariadne.Flow.Store
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
   end
 
   defmodule UnrelatedEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct []
 
     def tags(_), do: []
@@ -76,18 +76,12 @@ defmodule Ariadne.Flow.ReactorRunTest do
     end
   end
 
-  # An InMemory store whose agent process knows the test pid, so module reactors
-  # (whose handlers run inside that agent) can report back via Process.get(:inbox).
+  # Module reactors cannot close over the test pid, so they report back through the
+  # :inbox of the process their handler runs in — the one driving the store.
   defp inbox_store do
-    store = Store.InMemory.init()
-    test_pid = self()
+    Process.put(:inbox, self())
 
-    Agent.update(store.config, fn state ->
-      Process.put(:inbox, test_pid)
-      state
-    end)
-
-    store
+    Store.InMemory.init()
   end
 
   defp run(reactor_module, attrs \\ %{}) do
@@ -322,7 +316,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
   end
 
   defp count_store_event(count) do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.ReactorRunTest.CountEvent",
       data: %{"count" => count},
       tags: ["count:#{count}"]
@@ -330,7 +324,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
   end
 
   defp unrelated_store_event do
-    %Store.Event{
+    %Store.Record{
       type: "Ariadne.Flow.ReactorRunTest.UnrelatedEvent",
       data: %{},
       tags: []

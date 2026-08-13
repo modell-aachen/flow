@@ -10,21 +10,21 @@ The examples on this page reference three events:
 
 ```elixir
 defmodule CourseDefined do
-  @derive {Ariadne.Flow.Store.Event.Encoder, type: "course-defined"}
+  @derive {Ariadne.Flow.Event, type: "course-defined"}
   defstruct [:course_id, :capacity]
 
   def tags(e), do: ["course:#{e.course_id}"]
 end
 
 defmodule CourseCapacityChanged do
-  @derive {Ariadne.Flow.Store.Event.Encoder, type: "course-capacity-changed"}
+  @derive {Ariadne.Flow.Event, type: "course-capacity-changed"}
   defstruct [:course_id, :new_capacity]
 
   def tags(e), do: ["course:#{e.course_id}"]
 end
 
 defmodule StudentSubscribedToCourse do
-  @derive {Ariadne.Flow.Store.Event.Encoder, type: "student-subscribed-to-course"}
+  @derive {Ariadne.Flow.Event, type: "student-subscribed-to-course"}
   defstruct [:student_id, :course_id]
 
   def tags(e), do: ["student:#{e.student_id}", "course:#{e.course_id}"]
@@ -127,9 +127,9 @@ def course_capacity(course_id) do
 end
 ```
 
-The filter still matches what it matched before, but of all the events it matches only the last one reaches the handler — one event in total, not one per listed type. Here that is the newest of the `CourseDefined` and `CourseCapacityChanged` events together, which is exactly what a current capacity is. The superseded capacity changes never leave the store. This is the form the course example in `lib/flow/examples/` ships.
+The filter still matches what it matched before, but of all the events it matches only the last one reaches the handler — one event in total, not one per listed type. Here that is the newest of the `CourseDefined` and `CourseCapacityChanged` events together, which is exactly what a current capacity is. The superseded capacity changes never leave the store. This is the form the course example in `dev/flow/examples/` ships.
 
-What the option saves for certain is rows fetched and reduced, not necessarily rows scanned. The Postgres store puts the selection inside the item's own query as an `ORDER BY position DESC LIMIT 1`, which for a filter without `tags` is a backward walk of the position index that stops at the first hit. A tag-restricted filter joins the tag table and aggregates per position to enforce its AND-semantics, so whether the database can stop at the first group is the query planner's decision rather than a guarantee.
+What the option saves for certain is rows fetched and reduced, not necessarily rows scanned. The Postgres store puts the selection inside the filter's own query as an `ORDER BY position DESC LIMIT 1`, which for a filter without `tags` is a backward walk of the position index that stops at the first hit. A tag-restricted filter joins the tag table and aggregates per position to enforce its AND-semantics, so whether the database can stop at the first group is the query planner's decision rather than a guarantee.
 
 `only_last_event` applies per filter, not per query. Each filter of a composite picks the last of *its own* matches, so `course_exists/1` and `course_capacity/1` in one composite yield one event each — the last `CourseDefined`, and the last event of either type — and a filter without the option beside them still sees all of its matches.
 
@@ -156,8 +156,8 @@ end
 ```
 
 A composite consists of the following essential parts:
-- The `read_model` is a map from user-chosen keys to child reducers. Each child is reduced independently against the same event stream.
-- The `map_fn` receives a map with the same keys holding the reduced states, and returns whatever the composite is meant to produce. Here it returns a boolean.
+- The `reducers` is a map from user-chosen keys to child reducers. Each child is reduced independently against the same event stream.
+- The `mapper` receives a map with the same keys holding the reduced states, and returns whatever the composite is meant to produce. Here it returns a boolean.
 
 Child reducers can themselves be composites, so you can stack them to any depth.
 
@@ -166,11 +166,11 @@ Child reducers can themselves be composites, so you can stack them to any depth.
 Both `Ariadne.Flow.Projection` and `Ariadne.Flow.Composite` implement the `Ariadne.Flow.EventReducer` behaviour:
 
 ```elixir
-@callback reduce(reducer :: struct(), events :: list()) :: any()
+@callback reduce(reducer :: struct(), events :: [Ariadne.Flow.Envelope.t()]) :: any()
 @callback query(reducer :: struct()) :: list()
 ```
 
-- `reduce/2` folds a list of events into the reducer's result.
-- `query/1` returns a list of query items describing which events the reducer needs. For a projection this is just its filter; for a composite it is the union of its children's queries. `Ariadne.Flow.Store.read/3` normalises it once, and the read it returns is what both the result and the append condition of a dispatch are built from.
+- `reduce/2` folds a list of events into the reducer's result. Each event arrives as an `Ariadne.Flow.Envelope` — the decoded struct and its metadata, plus the `type` and `tags` it is stored under, which is what the reducer's filter matches on.
+- `query/1` returns a list of `Ariadne.Flow.Filter` values describing which events the reducer needs. For a projection this is just its filter; for a composite it is the union of its children's queries. `Ariadne.Flow.Store.read/3` normalises it once, and the read it returns is what both the result and the append condition of a dispatch are built from.
 
 This shared behaviour is what lets the rest of `Ariadne.Flow` treat projections and composites uniformly.

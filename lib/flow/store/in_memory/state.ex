@@ -1,14 +1,19 @@
 defmodule Ariadne.Flow.Store.InMemory.State do
   @moduledoc false
-  alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Query
-  alias Ariadne.Flow.Store.Event
-  alias Ariadne.Flow.Store.SequencedEvent
+  alias Ariadne.Flow.Store.Record
+  alias Ariadne.Flow.Store.SequencedRecord
   alias Ariadne.Flow.Store.StoredEventReactor
 
-  defstruct position: 0, events: [], checkpoints: %{}
+  defstruct position: 0, events: [], checkpoints: %{}, consume_locks: %{}
 
   def init(_opts \\ []), do: %__MODULE__{}
+
+  # Who is consuming is not stored data, so a rollback must keep the locks the store
+  # holds now rather than resurrecting the ones it held when the snapshot was taken.
+  def restore(%__MODULE__{} = snapshot, %__MODULE__{consume_locks: consume_locks}),
+    do: %__MODULE__{snapshot | consume_locks: consume_locks}
 
   def read(%__MODULE__{} = state, query, opts) do
     after_position = Keyword.get(opts, :after, 0)
@@ -45,96 +50,83 @@ defmodule Ariadne.Flow.Store.InMemory.State do
     end
   end
 
-  def append(%__MODULE__{} = state, %Event{} = event, opts), do: append(state, [event], opts)
+  def append(%__MODULE__{} = state, %Record{} = record, opts), do: append(state, [record], opts)
 
-  def consume(
-        %__MODULE__{} = state,
-        %StoredEventReactor{name: name, query: query, handler: handler},
-        batch_size
-      )
-      when is_integer(batch_size) and batch_size > 0 do
+  def unconsumed(%__MODULE__{} = state, %StoredEventReactor{name: name, query: query}, limit)
+      when is_integer(limit) and limit > 0 do
     prior_position = checkpoint(state, name) || 0
+    %{events: events} = read(state, query, after: prior_position, limit: limit)
 
-    %{events: events} = read(state, query, after: prior_position, limit: batch_size + 1)
-
-    {batch, more_in_store?} =
-      if length(events) > batch_size,
-        do: {Enum.take(events, batch_size), true},
-        else: {events, false}
-
-    {result, new_position} = build_result(batch, prior_position, more_in_store?, handler)
-    {put_checkpoint_position(state, name, new_position), result}
+    {prior_position, events}
   end
 
-  defp build_result(batch, prior_position, more_in_store?, handler) do
-    case handler.(batch) do
-      {:ok, count} ->
-        new_position = position_after(batch, count, prior_position)
+  def put_checkpoint(%__MODULE__{} = state, name, position) do
+    %__MODULE__{state | checkpoints: Map.put(state.checkpoints, name, position)}
+  end
 
-        {%ConsumeResult{
-           status: :ok,
-           processed: count,
-           last_position: new_position,
-           more?: more_in_store?
-         }, new_position}
+  # A holder that died without unlocking leaves its lock behind, so an acquisition takes
+  # one over rather than waiting on a process that will never release it.
+  def lock_consume(%__MODULE__{consume_locks: consume_locks} = state, name, pid) do
+    case Map.get(consume_locks, name) do
+      nil ->
+        {:ok, put_consume_lock(state, name, %{holder: pid, waiting: []})}
 
-      {:error, count, failure} ->
-        new_position = position_after(batch, count, prior_position)
-
-        {%ConsumeResult{
-           status: :error,
-           processed: count,
-           last_position: new_position,
-           more?: false,
-           failure: failure
-         }, new_position}
+      %{holder: holder, waiting: waiting} = lock ->
+        if Process.alive?(holder) do
+          {{:wait, holder},
+           put_consume_lock(state, name, %{lock | waiting: joining(waiting, pid)})}
+        else
+          {:ok, put_consume_lock(state, name, %{holder: pid, waiting: waiting})}
+        end
     end
   end
 
-  defp position_after(_batch, 0, prior_position), do: prior_position
-  defp position_after(batch, count, _prior) when count > 0, do: Enum.at(batch, count - 1).position
+  def unlock_consume(%__MODULE__{consume_locks: consume_locks} = state, name) do
+    {%{waiting: waiting}, remaining} = Map.pop!(consume_locks, name)
 
-  defp put_checkpoint_position(%__MODULE__{} = state, name, position) do
-    %__MODULE__{state | checkpoints: Map.put(state.checkpoints, name, position)}
+    {waiting, %__MODULE__{state | consume_locks: remaining}}
   end
+
+  defp put_consume_lock(%__MODULE__{} = state, name, lock) do
+    %__MODULE__{state | consume_locks: Map.put(state.consume_locks, name, lock)}
+  end
+
+  defp joining(waiting, pid), do: if(pid in waiting, do: waiting, else: [pid | waiting])
 
   defp take(list, :infinity), do: list
   defp take(list, n) when is_integer(n), do: Enum.take(list, n)
 
-  defp filter(sequenced_events, %Query{items: :all}) when is_list(sequenced_events),
+  defp filter(sequenced_events, %Query{filters: :all}) when is_list(sequenced_events),
     do: sequenced_events
 
-  defp filter(sequenced_events, %Query{items: items}) when is_list(sequenced_events) do
-    items
+  defp filter(sequenced_events, %Query{filters: filters}) when is_list(sequenced_events) do
+    filters
     |> Enum.flat_map(&select(sequenced_events, &1))
     |> Enum.uniq_by(& &1.position)
     |> Enum.sort_by(& &1.position)
   end
 
-  defp select(sequenced_events, %Query.Item{} = item) do
+  defp select(sequenced_events, %Filter{} = filter) do
     sequenced_events
-    |> Enum.filter(&Query.Item.matches?(item, &1.event))
-    |> Query.Item.take_last(item)
+    |> Enum.filter(&Filter.matches?(filter, &1.record))
+    |> Filter.take_last(filter)
   end
 
-  defp append_events(state, events, opts) do
+  defp append_events(state, records, opts) do
     created_at = Keyword.get(opts, :created_at, DateTime.utc_now())
     metadata = Keyword.get(opts, :metadata, %{})
 
     {new_state, appended} =
-      Enum.reduce(events, {state, []}, fn %Event{} = event, {acc, appended} ->
-        sequenced = %SequencedEvent{
-          event: event,
+      Enum.reduce(records, {state, []}, fn %Record{} = record, {%__MODULE__{} = acc, appended} ->
+        sequenced = %SequencedRecord{
+          record: record,
           position: acc.position + 1,
           created_at: created_at,
           metadata: metadata
         }
 
-        {%__MODULE__{
-           position: acc.position + 1,
-           events: [sequenced | acc.events],
-           checkpoints: acc.checkpoints
-         }, [sequenced | appended]}
+        {%__MODULE__{acc | position: acc.position + 1, events: [sequenced | acc.events]},
+         [sequenced | appended]}
       end)
 
     {new_state, Enum.reverse(appended)}

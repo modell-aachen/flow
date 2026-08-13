@@ -1,28 +1,28 @@
 defmodule Ariadne.Flow.Query.Optimizer do
-  alias Ariadne.Flow.Query.Item
+  alias Ariadne.Flow.Filter
 
   def optimize(query) do
-    {last_event_items, all_event_items} = Enum.split_with(query, & &1.only_last_event)
+    {last_event_filters, all_event_filters} = Enum.split_with(query, & &1.only_last_event)
 
-    optimize_all_event_items(all_event_items) ++ dedupe_last_event_items(last_event_items)
+    optimize_all_event_filters(all_event_filters) ++ dedupe_last_event_filters(last_event_filters)
   end
 
-  defp dedupe_last_event_items(query) do
-    Enum.uniq_by(query, fn %Item{types: types, tags: tags} ->
+  defp dedupe_last_event_filters(query) do
+    Enum.uniq_by(query, fn %Filter{types: types, tags: tags} ->
       {Enum.sort(types), tags && Enum.sort(tags)}
     end)
   end
 
-  defp optimize_all_event_items(query) do
+  defp optimize_all_event_filters(query) do
     query
     |> expand_to_type_constraint_pairs()
     |> minimize_constraints_per_type()
     |> invert_to_constraint_first()
-    |> build_items()
+    |> build_filters()
   end
 
   defp expand_to_type_constraint_pairs(query) do
-    for %Item{types: types, tags: tags} <- query,
+    for %Filter{types: types, tags: tags} <- query,
         type <- types,
         do: {type, normalize_constraint(tags)}
   end
@@ -53,10 +53,10 @@ defmodule Ariadne.Flow.Query.Optimizer do
     end
   end
 
-  defp build_items(constraint_to_types) do
+  defp build_filters(constraint_to_types) do
     for {constraint, types_set} <- constraint_to_types do
       tags = if constraint == :unrestricted, do: nil, else: Enum.to_list(constraint)
-      Item.new(%{types: Enum.to_list(types_set), tags: tags})
+      Filter.new(%{types: Enum.to_list(types_set), tags: tags})
     end
   end
 

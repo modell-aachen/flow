@@ -2,7 +2,7 @@ defmodule Ariadne.Flow.Store.SlowOperationLogger do
   @moduledoc false
   require Logger
 
-  @handler_id "modac-flow-store-slow-operations"
+  @handler_id "ariadne-flow-store-slow-operations"
 
   @default_thresholds [read: 20, append: 100, init_checkpoints: 100]
 
@@ -13,7 +13,7 @@ defmodule Ariadne.Flow.Store.SlowOperationLogger do
   ]
 
   def attach(thresholds \\ thresholds()) do
-    if Application.get_env(:flow, :flow_store_slow_logging, true) do
+    if Application.get_env(:ariadne_flow, :flow_store_slow_logging, true) do
       :telemetry.attach_many(@handler_id, @events, &__MODULE__.handle_event/4, thresholds)
     else
       :ok
@@ -67,7 +67,7 @@ defmodule Ariadne.Flow.Store.SlowOperationLogger do
   defp thresholds do
     Keyword.merge(
       @default_thresholds,
-      Application.get_env(:flow, :flow_store_slow_thresholds, [])
+      Application.get_env(:ariadne_flow, :flow_store_slow_thresholds, [])
     )
   end
 end

@@ -4,8 +4,8 @@ defmodule Ariadne.Flow.HandoffTest do
   alias Ariadne.Flow.Composite
   alias Ariadne.Flow.Handoff
   alias Ariadne.Flow.Projection
-  alias Ariadne.Flow.ReactorEngine
   alias Ariadne.Flow.ReactorRun
+  alias Ariadne.Flow.Scheduler
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Test.Repo
   alias Ecto.Adapters.SQL.Sandbox
@@ -13,7 +13,7 @@ defmodule Ariadne.Flow.HandoffTest do
   @moduletag capture_log: true
 
   defmodule CountEvent do
-    @derive Ariadne.Flow.Store.Event.Encoder
+    @derive Ariadne.Flow.Event
     defstruct count: 1
 
     def tags(%{count: count}), do: ["count:#{count}"]
@@ -123,10 +123,10 @@ defmodule Ariadne.Flow.HandoffTest do
 
   # A scheduler that reports every run it is handed as durably enqueued without doing
   # anything about it — what Flow does with a run it believes is somebody else's.
-  defmodule SchedulingEngine do
-    @behaviour ReactorEngine
+  defmodule ClaimingScheduler do
+    @behaviour Scheduler
 
-    @impl ReactorEngine
+    @impl Scheduler
     def schedule(reactor_runs, store, opts) do
       send(self(), {:scheduled, reactor_runs, store, opts})
 
@@ -134,10 +134,10 @@ defmodule Ariadne.Flow.HandoffTest do
     end
   end
 
-  defmodule NothingScheduledEngine do
-    @behaviour ReactorEngine
+  defmodule DecliningScheduler do
+    @behaviour Scheduler
 
-    @impl ReactorEngine
+    @impl Scheduler
     def schedule(reactor_runs, _store, _opts) do
       send(self(), {:offered, reactor_runs})
 
@@ -145,13 +145,13 @@ defmodule Ariadne.Flow.HandoffTest do
     end
   end
 
-  # What an engine that dumps its job args and hands back what it would enqueue looks like:
+  # What an scheduler that dumps its job args and hands back what it would enqueue looks like:
   # the round trip stringifies metadata keys, so the runs come back as equal-but-not-identical
   # terms.
-  defmodule RoundTrippingEngine do
-    @behaviour ReactorEngine
+  defmodule RoundTrippingScheduler do
+    @behaviour Scheduler
 
-    @impl ReactorEngine
+    @impl Scheduler
     def schedule(reactor_runs, _store, _opts) do
       Enum.map(reactor_runs, fn reactor_run ->
         reactor_run
@@ -177,16 +177,18 @@ defmodule Ariadne.Flow.HandoffTest do
     )
   end
 
+  # Module reactors cannot close over the test pid, so they report back through the
+  # :inbox of the process their handler runs in — the one driving the store.
   defp inbox_store do
-    store = Store.InMemory.init()
-    test_pid = self()
+    Process.put(:inbox, self())
 
-    Agent.update(store.config, fn state ->
-      Process.put(:inbox, test_pid)
-      state
-    end)
+    Store.InMemory.init()
+  end
 
-    store
+  defp driving(inbox, fun) do
+    Process.put(:inbox, inbox)
+
+    fun.()
   end
 
   # A raising reactor takes the InMemory agent down with it, so a raise can only be
@@ -227,19 +229,22 @@ defmodule Ariadne.Flow.HandoffTest do
   end
 
   describe "new/1" do
-    test "defaults to no engine at all, so every run is Flow's to execute" do
-      assert %Handoff{engine: nil, metadata: %{}, nested: false} =
+    test "defaults to no scheduler at all, so every run is Flow's to execute" do
+      assert %Handoff{scheduler: nil, metadata: %{}, nested: false} =
                Handoff.new(%{reactors: [CountsReactor]})
     end
 
-    test "normalizes a bare engine module to a {module, opts} pair" do
-      assert %Handoff{engine: {SchedulingEngine, []}} =
-               Handoff.new(%{reactors: [CountsReactor], engine: SchedulingEngine})
+    test "normalizes a bare scheduler module to a {module, opts} pair" do
+      assert %Handoff{scheduler: {ClaimingScheduler, []}} =
+               Handoff.new(%{reactors: [CountsReactor], scheduler: ClaimingScheduler})
     end
 
-    test "keeps an explicit {module, opts} engine" do
-      assert %Handoff{engine: {SchedulingEngine, [foo: :bar]}} =
-               Handoff.new(%{reactors: [CountsReactor], engine: {SchedulingEngine, foo: :bar}})
+    test "keeps an explicit {module, opts} scheduler" do
+      assert %Handoff{scheduler: {ClaimingScheduler, [foo: :bar]}} =
+               Handoff.new(%{
+                 reactors: [CountsReactor],
+                 scheduler: {ClaimingScheduler, foo: :bar}
+               })
     end
   end
 
@@ -258,7 +263,7 @@ defmodule Ariadne.Flow.HandoffTest do
     end
   end
 
-  describe "hand_off/3 with no engine" do
+  describe "hand_off/3 with no scheduler" do
     test "hands back one run per reactor, in declaration order" do
       store = inbox_store()
       events = append(store)
@@ -305,7 +310,7 @@ defmodule Ariadne.Flow.HandoffTest do
       drive([CountsReactor], store, first)
       assert Store.checkpoint(store, "counts") == 1
 
-      Store.append(store, [%Store.Event{type: "Unrelated", data: %{}, tags: []}])
+      Store.append(store, [%Store.Record{type: "Unrelated", data: %{}, tags: []}])
       hand_off([CountsReactor], store, append(store))
 
       assert Store.checkpoint(store, "counts") == 1
@@ -318,7 +323,7 @@ defmodule Ariadne.Flow.HandoffTest do
       _earlier = append(store)
       events = append(store)
 
-      assert [] = drive([CountsReactor], store, events, %{engine: SchedulingEngine})
+      assert [] = drive([CountsReactor], store, events, %{scheduler: ClaimingScheduler})
 
       assert Store.checkpoint(store, "counts") == 1
       refute_received {:got, "counts", _, _}
@@ -492,14 +497,14 @@ defmodule Ariadne.Flow.HandoffTest do
     end
   end
 
-  describe "hand_off/3 offers the runs to the engine" do
+  describe "hand_off/3 offers the runs to the scheduler" do
     test "hands it every run at once, together with the store and its configured opts" do
       store = Store.InMemory.init()
       events = append(store)
 
       assert [] =
                hand_off([CountsReactor, AlphaReactor], store, events, %{
-                 engine: {SchedulingEngine, foo: :bar}
+                 scheduler: {ClaimingScheduler, foo: :bar}
                })
 
       assert_received {:scheduled, runs, ^store, opts}
@@ -507,26 +512,26 @@ defmodule Ariadne.Flow.HandoffTest do
       assert opts == [foo: :bar]
     end
 
-    test "keeps the runs the engine did not report as scheduled" do
+    test "keeps the runs the scheduler did not report as scheduled" do
       store = inbox_store()
       events = append(store)
 
-      assert [] = hand_off([CountsReactor], store, events, %{engine: SchedulingEngine})
+      assert [] = hand_off([CountsReactor], store, events, %{scheduler: ClaimingScheduler})
 
       assert [%ReactorRun{reactor: CountsReactor}] =
-               hand_off([CountsReactor], store, events, %{engine: NothingScheduledEngine})
+               hand_off([CountsReactor], store, events, %{scheduler: DecliningScheduler})
 
       assert_received {:offered, [%ReactorRun{reactor: CountsReactor}]}
     end
 
-    # Reported as scheduled is reported as scheduled, however the engine got the value
-    # back — a job engine that returns what it dumped and reloaded means the same thing.
-    test "recognizes a claimed run the engine rebuilt rather than handed back" do
+    # Reported as scheduled is reported as scheduled, however the scheduler got the value
+    # back — a job scheduler that returns what it dumped and reloaded means the same thing.
+    test "recognizes a claimed run the scheduler rebuilt rather than handed back" do
       store = inbox_store()
       events = append(store)
 
       assert [] =
-               drive([CountsReactor], store, events, %{engine: RoundTrippingEngine})
+               drive([CountsReactor], store, events, %{scheduler: RoundTrippingScheduler})
 
       refute_received {:got, "counts", _, _}
     end
@@ -539,19 +544,19 @@ defmodule Ariadne.Flow.HandoffTest do
 
       assert [%ReactorRun{reactor: CountsReactor}] =
                hand_off([CountsReactor, AlphaReactor], store, events, %{
-                 engine: {SchedulingEngine, schedules: scheduled}
+                 scheduler: {ClaimingScheduler, schedules: scheduled}
                })
     end
   end
 
   describe "hand_off/3 nested in an outer transaction" do
-    test "keeps the sync runs and never offers them to the engine" do
+    test "keeps the sync runs and never offers them to the scheduler" do
       store = inbox_store()
       events = append(store)
 
       assert [%ReactorRun{reactor: SyncReactor}] =
                hand_off([SyncReactor, CountsReactor], store, events, %{
-                 engine: SchedulingEngine,
+                 scheduler: ClaimingScheduler,
                  nested: true
                })
 
@@ -559,14 +564,14 @@ defmodule Ariadne.Flow.HandoffTest do
     end
 
     # The async run's work lands after the outer commit either way — through a job row the
-    # engine inserted, or through the next dispatch or catch-up.
-    test "drops an async run the engine did not schedule rather than executing it" do
+    # scheduler inserted, or through the next dispatch or catch-up.
+    test "drops an async run the scheduler did not schedule rather than executing it" do
       store = inbox_store()
       events = append(store)
 
       assert [] =
                drive([CountsReactor], store, events, %{
-                 engine: NothingScheduledEngine,
+                 scheduler: DecliningScheduler,
                  nested: true
                })
 
@@ -575,7 +580,7 @@ defmodule Ariadne.Flow.HandoffTest do
       assert Store.checkpoint(store, "counts") == 0
     end
 
-    test "drops an async run with no engine to offer it to" do
+    test "drops an async run with no scheduler to offer it to" do
       store = inbox_store()
       events = append(store)
 
@@ -646,7 +651,7 @@ defmodule Ariadne.Flow.HandoffTest do
       store = inbox_store()
       _events = append(store)
 
-      assert [] = catch_up([CountsReactor], store, %{engine: NothingScheduledEngine})
+      assert [] = catch_up([CountsReactor], store, %{scheduler: DecliningScheduler})
 
       refute_received {:offered, _runs}
       assert nil == Store.checkpoint(store, "counts")
@@ -663,13 +668,13 @@ defmodule Ariadne.Flow.HandoffTest do
       assert_received {:got, "from-origin", %CountEvent{count: 1}, _}
     end
 
-    test "offers its runs to the engine like a dispatch does, metadata and all" do
+    test "offers its runs to the scheduler like a dispatch does, metadata and all" do
       store = Store.InMemory.init()
       _events = append(store)
 
       assert [] =
                catch_up([FromOriginReactor], store, %{
-                 engine: {SchedulingEngine, foo: :bar},
+                 scheduler: {ClaimingScheduler, foo: :bar},
                  metadata: %{"tenant_id" => "acme"}
                })
 
@@ -684,10 +689,12 @@ defmodule Ariadne.Flow.HandoffTest do
       total = 20
       events = Enum.flat_map(1..total, fn _ -> append(store) end)
 
+      inbox = self()
+
       drivers = [
-        fn -> drive([FromOriginReactor], store, events) end,
-        fn -> catch_up([FromOriginReactor], store) end,
-        fn -> catch_up([FromOriginReactor], store) end
+        fn -> driving(inbox, fn -> drive([FromOriginReactor], store, events) end) end,
+        fn -> driving(inbox, fn -> catch_up([FromOriginReactor], store) end) end,
+        fn -> driving(inbox, fn -> catch_up([FromOriginReactor], store) end) end
       ]
 
       results =

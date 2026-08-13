@@ -1,10 +1,10 @@
 defmodule Ariadne.Flow.ReactorRun do
   @moduledoc false
   alias Ariadne.Flow.ConsumeResult
+  alias Ariadne.Flow.Event.Codec
   alias Ariadne.Flow.Reactor
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.Store
-  alias Ariadne.Flow.Store.Event.Codec
   alias Ariadne.Flow.Store.StoredEventReactor
 
   @enforce_keys [:reactor]
