@@ -31,7 +31,7 @@ defmodule AriadneFlow.MixProject do
           "docs/testing.md"
         ],
         main: "introduction",
-        filter_modules: ~r/^Elixir\.Ariadne\.Flow\.(?!Examples)/,
+        filter_modules: &library_module?/2,
         nest_modules_by_prefix: [Ariadne.Flow]
       ],
       test_paths: ["./lib", "./dev"],
@@ -46,6 +46,13 @@ defmodule AriadneFlow.MixProject do
 
   defp elixirc_paths(:prod), do: ["lib"]
   defp elixirc_paths(_env), do: ["lib", "dev"]
+
+  defp library_module?(module, _metadata) do
+    case Code.ensure_loaded?(module) && module.module_info(:compile)[:source] do
+      source when is_list(source) -> String.starts_with?(Path.relative_to_cwd(source), "lib/")
+      _ -> false
+    end
+  end
 
   defp package do
     [
