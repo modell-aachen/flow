@@ -53,6 +53,9 @@
         "MIX_ENV=dev mix compile",
         "MIX_ENV=dev mix docs --formatter html"
       ],
+      "publish": [
+        "MIX_ENV=dev mix hex.publish --yes"
+      ],
       "test.stop": [
         "devbox services stop postgresql"
       ]
