@@ -3,6 +3,11 @@ name: Release Please
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish to Hex (e.g. v0.10.0)"
+        required: true
 
 permissions:
   contents: write
@@ -14,10 +19,42 @@ concurrency:
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
+
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
 
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: |
+      !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
+
+      - uses: jetify-com/devbox-install-action@8c6a66ed6273138b1915457069de78cb52fe3bd7 # v0.15.0
+        with:
+          enable-cache: "true"
+
+      - run: devbox run setup
+
+      - run: devbox run publish
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}

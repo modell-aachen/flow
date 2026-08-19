@@ -54,6 +54,16 @@ Every push to `main` refreshes a release pull request that bumps `version:` in
 GitHub release. While the library is pre-1.0, `feat`/`fix` bump the patch and
 `!` bumps the minor, so a breaking change goes to 0.2.0 rather than 1.0.0.
 
+Cutting the release also publishes the package and its documentation to Hex:
+the workflow checks out the new tag and runs `devbox run publish`
+(`MIX_ENV=dev mix hex.publish --yes`). It does not re-run the suite — `CI`
+runs on the same push, against the very commit being tagged. It authenticates
+with the `HEX_API_KEY` repository secret, a Hex API key with write access —
+created on the [hex.pm dashboard](https://hex.pm/dashboard/keys), since hex 2.5
+no longer generates user keys from the CLI. If that job fails, the release is
+already tagged, so re-run `Release Please` via *Run workflow* and give it the
+tag to publish.
+
 ## Dependency Selection
 
 Especially in Elixir do not use/introduce copyleft licenses, e.g. GPL, AGPL, etc.
