@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/modell-aachen/flow/compare/v0.10.1...v0.10.2) (2026-09-24)
+
+
+### Dependencies
+
+* bump ex_doc from 0.40.3 to 0.40.4 in the hex group ([#47](https://github.com/modell-aachen/flow/issues/47)) ([2a3bbb0](https://github.com/modell-aachen/flow/commit/2a3bbb083f9911baa92720370a3a3af93d80827b))
+
 ## [0.10.1](https://github.com/modell-aachen/flow/compare/v0.10.0...v0.10.1) (2026-08-19)
 
 
