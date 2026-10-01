@@ -102,8 +102,8 @@ defmodule Ariadne.Flow.Store.Backend do
   Creates the checkpoints of the reactors that have none, leaving every existing one where
   it stands, and returns the names of the checkpoints this call created.
 
-  Creating a checkpoint is what makes a reactor join the store, so the return is what tells
-  its caller that it is the one the reactor joined through. Exactly one caller may ever be
+  A reactor is new to a store until its checkpoint is created there, so the return is what
+  tells a caller that it is the one starting the reactor. Exactly one caller may ever be
   told so for a given name: of two calls racing to create the same checkpoint, the one
   that finds it already there reports nothing for it.
 

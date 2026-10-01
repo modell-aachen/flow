@@ -51,11 +51,11 @@ defmodule Ariadne.Flow.Handoff do
     |> unscheduled(handoff, store)
   end
 
-  def join(%__MODULE__{reactors: reactors} = handoff, %Store{} = store) do
-    joined = Store.init_checkpoints(store, declared_checkpoints(reactors))
+  def bootstrap_reactors(%__MODULE__{reactors: reactors} = handoff, %Store{} = store) do
+    created = Store.init_checkpoints(store, declared_checkpoints(reactors))
 
     reactors
-    |> Enum.filter(&(&1.reactor().name in joined))
+    |> Enum.filter(&(&1.reactor().name in created))
     |> runs(handoff.metadata)
     |> unscheduled(handoff, store)
   end

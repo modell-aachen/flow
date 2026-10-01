@@ -76,10 +76,10 @@ defmodule Ariadne.Flow.Application do
     |> reactor_error()
   end
 
-  def join(%__MODULE__{store: store} = application, opts \\ []) do
+  def bootstrap_reactors(%__MODULE__{store: store} = application, opts \\ []) do
     application
     |> out_of_band_handoff(opts)
-    |> Handoff.join(store)
+    |> Handoff.bootstrap_reactors(store)
     |> Handoff.execute(store)
     |> reactor_error()
   end

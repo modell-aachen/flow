@@ -132,7 +132,7 @@ defmodule Ariadne.Flow.PostgresStoreTest do
       on_exit(fn -> unboxed(fn -> purge(context) end) end)
 
       test_pid = self()
-      checkpoints = [%{name: "joining", position: 0}]
+      checkpoints = [%{name: "new-reactor", position: 0}]
 
       first =
         Task.async(fn ->
@@ -165,7 +165,7 @@ defmodule Ariadne.Flow.PostgresStoreTest do
       send(first.pid, :commit)
 
       assert Enum.sort([Task.await(first, 5_000), Task.await(second, 5_000)]) ==
-               [[], ["joining"]]
+               [[], ["new-reactor"]]
     end
   end
 

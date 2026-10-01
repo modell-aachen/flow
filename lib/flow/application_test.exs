@@ -786,7 +786,7 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
-  describe "dispatch/3 with a sync reactor joining with history" do
+  describe "dispatch/3 with a sync reactor starting over history" do
     test "awaits the reactor working through the whole history first" do
       application =
         Application.new(%{
@@ -1110,12 +1110,12 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
-  describe "join/2" do
-    test "schedules only the reactors that joined in this call" do
+  describe "bootstrap_reactors/2" do
+    test "schedules only the reactors whose checkpoint this call created" do
       store = store_with_history()
 
       :ok =
-        Application.join(
+        Application.bootstrap_reactors(
           Application.new(%{
             store: store,
             reactors: [HistoryReactor],
@@ -1132,12 +1132,13 @@ defmodule Ariadne.Flow.ApplicationTest do
           scheduler: ClaimingScheduler
         })
 
-      assert :ok = Application.join(application, metadata: %{"trace_id" => "abc123"})
+      assert :ok =
+               Application.bootstrap_reactors(application, metadata: %{"trace_id" => "abc123"})
 
       assert_received {:scheduled, [%ReactorRun{reactor: SyncHistoryReactor} = run], _, _}
       assert run.metadata == %{"trace_id" => "abc123"}
 
-      assert :ok = Application.join(application)
+      assert :ok = Application.bootstrap_reactors(application)
 
       refute_received {:scheduled, _, _, _}
     end
@@ -1145,7 +1146,10 @@ defmodule Ariadne.Flow.ApplicationTest do
     test "skips a reactor that starts from now, leaving it to the first dispatch" do
       store = store_with_history()
 
-      assert :ok = Application.join(Application.new(%{store: store, reactors: [CountsReactor]}))
+      assert :ok =
+               Application.bootstrap_reactors(
+                 Application.new(%{store: store, reactors: [CountsReactor]})
+               )
 
       assert Store.checkpoint(store, "counts") == nil
       refute_received {:got, "counts", _, _}
@@ -1155,7 +1159,9 @@ defmodule Ariadne.Flow.ApplicationTest do
       store = store_with_history()
 
       assert :ok =
-               Application.join(Application.new(%{store: store, reactors: [SyncHistoryReactor]}))
+               Application.bootstrap_reactors(
+                 Application.new(%{store: store, reactors: [SyncHistoryReactor]})
+               )
 
       assert_received {:got, "sync-history", %CountEvent{count: 1}, _}
       assert Store.checkpoint(store, "sync-history") == 1
@@ -1166,10 +1172,10 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{store: store_with_history(), reactors: [BoomHistoryReactor]})
 
       assert {:error, %ReactorError{failures: [%{name: "boom-history", reason: :kaboom}]}} =
-               Application.join(application)
+               Application.bootstrap_reactors(application)
     end
 
-    test "does not schedule a reactor that already joined through a dispatch" do
+    test "does not schedule a reactor a dispatch already started" do
       store = inbox_store()
 
       {:ok, _} =
@@ -1181,7 +1187,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       application =
         Application.new(%{store: store, reactors: [HistoryReactor], scheduler: ClaimingScheduler})
 
-      assert :ok = Application.join(application)
+      assert :ok = Application.bootstrap_reactors(application)
 
       refute_received {:scheduled, _, _, _}
     end

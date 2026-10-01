@@ -233,11 +233,11 @@ defmodule Ariadne.Flow.HandoffTest do
     |> Handoff.execute(store)
   end
 
-  defp join(reactors, store, attrs \\ %{}) do
+  defp bootstrap_reactors(reactors, store, attrs \\ %{}) do
     attrs
     |> Map.merge(%{reactors: reactors})
     |> Handoff.new()
-    |> Handoff.join(store)
+    |> Handoff.bootstrap_reactors(store)
   end
 
   describe "new/1" do
@@ -725,22 +725,22 @@ defmodule Ariadne.Flow.HandoffTest do
     end
   end
 
-  describe "join/2" do
+  describe "bootstrap_reactors/2" do
     test "runs only the reactors whose checkpoint it created" do
       store = inbox_store()
       events = append(store)
       hand_off([FromOriginReactor], store, events)
 
       assert [%ReactorRun{reactor: FromPositionReactor}] =
-               join([FromOriginReactor, FromPositionReactor], store)
+               bootstrap_reactors([FromOriginReactor, FromPositionReactor], store)
     end
 
-    test "returns no runs once every reactor has joined" do
+    test "returns no runs once every reactor has a checkpoint" do
       store = inbox_store()
       _events = append(store)
-      join([FromOriginReactor], store)
+      bootstrap_reactors([FromOriginReactor], store)
 
-      assert [] = join([FromOriginReactor], store, %{scheduler: DecliningScheduler})
+      assert [] = bootstrap_reactors([FromOriginReactor], store, %{scheduler: DecliningScheduler})
 
       refute_received {:offered, _runs}
     end
@@ -749,7 +749,7 @@ defmodule Ariadne.Flow.HandoffTest do
       store = inbox_store()
       _events = append(store)
 
-      assert [] = join([CountsReactor], store)
+      assert [] = bootstrap_reactors([CountsReactor], store)
 
       assert nil == Store.checkpoint(store, "counts")
     end
@@ -759,7 +759,7 @@ defmodule Ariadne.Flow.HandoffTest do
       _events = append(store)
 
       assert [] =
-               join([SyncFromOriginReactor], store, %{
+               bootstrap_reactors([SyncFromOriginReactor], store, %{
                  scheduler: ClaimingScheduler,
                  metadata: %{"tenant_id" => "acme"}
                })
