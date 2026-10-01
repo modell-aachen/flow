@@ -53,7 +53,6 @@ defmodule Ariadne.Flow.Store.SlowOperationLogger do
         "flow.backend" => backend(metadata),
         "flow.event_count" => Map.get(measurements, :event_count),
         "flow.checkpoint_count" => Map.get(measurements, :checkpoint_count),
-        "flow.created_count" => Map.get(measurements, :created_count),
         "flow.query" => Map.get(metadata, :query),
         "flow.condition" => Map.get(metadata, :condition)
       },
