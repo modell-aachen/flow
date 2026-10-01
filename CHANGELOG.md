@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.11.0](https://github.com/modell-aachen/flow/compare/v0.10.2...v0.11.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* Store.Backend.init_checkpoints/2 returns the names of the checkpoints it created instead of :ok.
+
+### Features
+
+* bootstrap a store's new reactors ([#49](https://github.com/modell-aachen/flow/issues/49)) ([951d3b2](https://github.com/modell-aachen/flow/commit/951d3b283e8d48b332f909bc887ecee25862b704))
+
 ## [0.10.2](https://github.com/modell-aachen/flow/compare/v0.10.1...v0.10.2) (2026-09-24)
 
 
