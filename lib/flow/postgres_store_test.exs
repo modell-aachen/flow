@@ -126,6 +126,49 @@ defmodule Ariadne.Flow.PostgresStoreTest do
     end
   end
 
+  describe "initializing the same checkpoint from two connections" do
+    test "reports it created to exactly one of them" do
+      context = "init_once_#{System.unique_integer([:positive])}"
+      on_exit(fn -> unboxed(fn -> purge(context) end) end)
+
+      test_pid = self()
+      checkpoints = [%{name: "joining", position: 0}]
+
+      first =
+        Task.async(fn ->
+          unboxed(fn ->
+            Store.transaction(store(context), fn ->
+              created = Store.init_checkpoints(store(context), checkpoints)
+              send(test_pid, :initialized)
+
+              receive do
+                :commit -> created
+              after
+                5_000 -> flunk("never told to commit")
+              end
+            end)
+          end)
+        end)
+
+      assert_receive :initialized, 5_000
+
+      second =
+        Task.async(fn ->
+          unboxed(fn -> Store.init_checkpoints(store(context), checkpoints) end)
+        end)
+
+      Process.sleep(100)
+
+      assert Task.yield(second, 0) == nil,
+             "the second init decided before the first one's insert committed"
+
+      send(first.pid, :commit)
+
+      assert Enum.sort([Task.await(first, 5_000), Task.await(second, 5_000)]) ==
+               [[], ["joining"]]
+    end
+  end
+
   # Nested, so neither dispatch executes the reactor and the checkpoint is what the append
   # initialized it to and nothing else.
   defp holding_open(context, worker, test_pid) do

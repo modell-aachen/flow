@@ -204,13 +204,15 @@ defmodule Ariadne.Flow.Store.Postgres do
         %{context: context, name: name, position: position, updated_at: updated_at}
       end)
 
-    repo.insert_all(EctoReactorCheckpoint, entries,
-      on_conflict: :nothing,
-      conflict_target: [:context, :name],
-      prefix: prefix
-    )
+    {_count, created} =
+      repo.insert_all(EctoReactorCheckpoint, entries,
+        on_conflict: :nothing,
+        conflict_target: [:context, :name],
+        returning: [:name],
+        prefix: prefix
+      )
 
-    :ok
+    Enum.map(created, & &1.name)
   end
 
   @impl Backend

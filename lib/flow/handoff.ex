@@ -51,6 +51,15 @@ defmodule Ariadne.Flow.Handoff do
     |> unscheduled(handoff, store)
   end
 
+  def join(%__MODULE__{reactors: reactors} = handoff, %Store{} = store) do
+    joined = Store.init_checkpoints(store, declared_checkpoints(reactors))
+
+    reactors
+    |> Enum.filter(&(&1.reactor().name in joined))
+    |> runs(handoff.metadata)
+    |> unscheduled(handoff, store)
+  end
+
   def execute(reactor_runs, %Store{} = store) when is_list(reactor_runs) do
     Enum.flat_map(reactor_runs, &report(failures(&1, store)))
   end

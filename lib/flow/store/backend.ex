@@ -100,7 +100,12 @@ defmodule Ariadne.Flow.Store.Backend do
 
   @doc """
   Creates the checkpoints of the reactors that have none, leaving every existing one where
-  it stands.
+  it stands, and returns the names of the checkpoints this call created.
+
+  Creating a checkpoint is what makes a reactor join the store, so the return is what tells
+  its caller that it is the one the reactor joined through. Exactly one caller may ever be
+  told so for a given name: of two calls racing to create the same checkpoint, the one
+  that finds it already there reports nothing for it.
 
   This is what decides where a reactor starts, and it is called with the events of the
   append it belongs to still uncommitted, so a reactor starting *from now* is pinned to
@@ -112,7 +117,7 @@ defmodule Ariadne.Flow.Store.Backend do
   Moving an existing checkpoint is never right here — it is where a reactor stands, and
   the declaration only ever says where a reactor that has never run begins.
   """
-  @callback init_checkpoints(config(), [checkpoint_init()]) :: :ok
+  @callback init_checkpoints(config(), [checkpoint_init()]) :: [String.t()]
 
   @doc """
   Returns the position the reactor's stored checkpoint stands at, `nil` when it has none.

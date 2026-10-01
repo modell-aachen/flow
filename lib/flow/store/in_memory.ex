@@ -70,7 +70,7 @@ defmodule Ariadne.Flow.Store.InMemory do
 
   @impl Backend
   def init_checkpoints(agent, checkpoints) do
-    Agent.update(agent, &State.init_checkpoints(&1, checkpoints))
+    Agent.get_and_update(agent, &State.init_checkpoints(&1, checkpoints))
   end
 
   @impl Backend

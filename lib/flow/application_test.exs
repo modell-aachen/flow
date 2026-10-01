@@ -144,6 +144,26 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
+  defmodule SyncHistoryReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{
+          name: "sync-history",
+          filter: %{types: [CountEvent]},
+          sync: true,
+          start_after_position: 0
+        },
+        fn event, metadata ->
+          send(Process.get(:inbox), {:got, "sync-history", event, metadata})
+          :ok
+        end
+      )
+    end
+  end
+
   defmodule RaisingSyncReactor do
     alias Ariadne.Flow.ApplicationTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -258,6 +278,13 @@ defmodule Ariadne.Flow.ApplicationTest do
 
   # Appending from inside the decide function lands between the command's read and
   # its append, which is the conflict the append condition guards against.
+  defp store_with_history do
+    store = inbox_store()
+    {:ok, _} = Application.dispatch(Application.new(%{store: store}), count_command(1))
+
+    store
+  end
+
   defp conflicting_count_command(store), do: conflicting_count_command(store, :always)
 
   # The same conflict, but only for the first `conflicts` attempts — the ones after that
@@ -759,6 +786,58 @@ defmodule Ariadne.Flow.ApplicationTest do
     end
   end
 
+  describe "dispatch/3 with a sync reactor joining with history" do
+    test "awaits the reactor working through the whole history first" do
+      application =
+        Application.new(%{
+          store: store_with_history(),
+          reactors: [SyncHistoryReactor],
+          scheduler: {ClaimingScheduler, delay: 20}
+        })
+
+      assert {:ok, _} = Application.dispatch(application, count_command(1), await_timeout: 2_000)
+
+      assert_received {:scheduled, [%ReactorRun{reactor: SyncHistoryReactor} = run], _, _}
+      assert ReactorRun.sync?(run)
+      assert_received {:got, "sync-history", %CountEvent{count: 1}, _}
+      assert_received {:got, "sync-history", %CountEvent{count: 2}, _}
+    end
+
+    test "raises a post-commit timeout when the history outlasts the wait" do
+      application =
+        Application.new(%{
+          store: store_with_history(),
+          reactors: [SyncHistoryReactor],
+          scheduler: ClaimingScheduler
+        })
+
+      assert %PostCommitError{reason: :timeout, unconfirmed: [%{name: "sync-history"}]} =
+               assert_raise(PostCommitError, fn ->
+                 Application.dispatch(application, count_command(1), await_timeout: 50)
+               end)
+    end
+
+    test "runs the replay itself when nested, the confirmation being unable to come otherwise" do
+      store = store_with_history()
+
+      application =
+        Application.new(%{
+          store: store,
+          reactors: [SyncHistoryReactor],
+          scheduler: ClaimingScheduler
+        })
+
+      assert {:ok, _} =
+               Store.transaction(store, fn ->
+                 Application.dispatch(application, count_command(1), await_timeout: 0)
+               end)
+
+      refute_received {:scheduled, _, _, _}
+      assert_received {:got, "sync-history", %CountEvent{count: 1}, _}
+      assert_received {:got, "sync-history", %CountEvent{count: 2}, _}
+    end
+  end
+
   describe "dispatch/3 nested in an outer transaction" do
     test "never offers a sync run to the scheduler, running it itself instead" do
       store = inbox_store()
@@ -1028,6 +1107,83 @@ defmodule Ariadne.Flow.ApplicationTest do
 
       assert %RuntimeError{message: "kaboom"} = reason
       assert_received {:got, "history", %CountEvent{count: 1}, _}
+    end
+  end
+
+  describe "join/2" do
+    test "schedules only the reactors that joined in this call" do
+      store = store_with_history()
+
+      :ok =
+        Application.join(
+          Application.new(%{
+            store: store,
+            reactors: [HistoryReactor],
+            scheduler: ClaimingScheduler
+          })
+        )
+
+      assert_received {:scheduled, [%ReactorRun{reactor: HistoryReactor}], _, _}
+
+      application =
+        Application.new(%{
+          store: store,
+          reactors: [HistoryReactor, SyncHistoryReactor],
+          scheduler: ClaimingScheduler
+        })
+
+      assert :ok = Application.join(application, metadata: %{"trace_id" => "abc123"})
+
+      assert_received {:scheduled, [%ReactorRun{reactor: SyncHistoryReactor} = run], _, _}
+      assert run.metadata == %{"trace_id" => "abc123"}
+
+      assert :ok = Application.join(application)
+
+      refute_received {:scheduled, _, _, _}
+    end
+
+    test "skips a reactor that starts from now, leaving it to the first dispatch" do
+      store = store_with_history()
+
+      assert :ok = Application.join(Application.new(%{store: store, reactors: [CountsReactor]}))
+
+      assert Store.checkpoint(store, "counts") == nil
+      refute_received {:got, "counts", _, _}
+    end
+
+    test "runs the replay itself when there is no scheduler" do
+      store = store_with_history()
+
+      assert :ok =
+               Application.join(Application.new(%{store: store, reactors: [SyncHistoryReactor]}))
+
+      assert_received {:got, "sync-history", %CountEvent{count: 1}, _}
+      assert Store.checkpoint(store, "sync-history") == 1
+    end
+
+    test "returns a failing replay as a value" do
+      application =
+        Application.new(%{store: store_with_history(), reactors: [BoomHistoryReactor]})
+
+      assert {:error, %ReactorError{failures: [%{name: "boom-history", reason: :kaboom}]}} =
+               Application.join(application)
+    end
+
+    test "does not schedule a reactor that already joined through a dispatch" do
+      store = inbox_store()
+
+      {:ok, _} =
+        Application.dispatch(
+          Application.new(%{store: store, reactors: [HistoryReactor]}),
+          count_command(1)
+        )
+
+      application =
+        Application.new(%{store: store, reactors: [HistoryReactor], scheduler: ClaimingScheduler})
+
+      assert :ok = Application.join(application)
+
+      refute_received {:scheduled, _, _, _}
     end
   end
 

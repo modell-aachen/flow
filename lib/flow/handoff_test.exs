@@ -64,6 +64,11 @@ defmodule Ariadne.Flow.HandoffTest do
     def reactor, do: Recorder.reactor("sync", %{sync: true})
   end
 
+  defmodule SyncFromOriginReactor do
+    alias Ariadne.Flow.HandoffTest.Recorder
+    def reactor, do: Recorder.reactor("sync-from-origin", %{sync: true, start_after_position: 0})
+  end
+
   defmodule BoomFromOriginReactor do
     alias Ariadne.Flow.HandoffTest.CountEvent
     alias Ariadne.Flow.Reactor
@@ -226,6 +231,13 @@ defmodule Ariadne.Flow.HandoffTest do
     |> Handoff.new()
     |> Handoff.catch_up(store)
     |> Handoff.execute(store)
+  end
+
+  defp join(reactors, store, attrs \\ %{}) do
+    attrs
+    |> Map.merge(%{reactors: reactors})
+    |> Handoff.new()
+    |> Handoff.join(store)
   end
 
   describe "new/1" do
@@ -710,6 +722,49 @@ defmodule Ariadne.Flow.HandoffTest do
 
       refute_receive {:got, "from-origin", _, _}
       assert total == Store.checkpoint(store, "from-origin")
+    end
+  end
+
+  describe "join/2" do
+    test "runs only the reactors whose checkpoint it created" do
+      store = inbox_store()
+      events = append(store)
+      hand_off([FromOriginReactor], store, events)
+
+      assert [%ReactorRun{reactor: FromPositionReactor}] =
+               join([FromOriginReactor, FromPositionReactor], store)
+    end
+
+    test "returns no runs once every reactor has joined" do
+      store = inbox_store()
+      _events = append(store)
+      join([FromOriginReactor], store)
+
+      assert [] = join([FromOriginReactor], store, %{scheduler: DecliningScheduler})
+
+      refute_received {:offered, _runs}
+    end
+
+    test "skips a reactor that starts from now, having no position to invent" do
+      store = inbox_store()
+      _events = append(store)
+
+      assert [] = join([CountsReactor], store)
+
+      assert nil == Store.checkpoint(store, "counts")
+    end
+
+    test "offers its runs to the scheduler, metadata and all" do
+      store = inbox_store()
+      _events = append(store)
+
+      assert [] =
+               join([SyncFromOriginReactor], store, %{
+                 scheduler: ClaimingScheduler,
+                 metadata: %{"tenant_id" => "acme"}
+               })
+
+      assert_received {:scheduled, [%ReactorRun{metadata: %{"tenant_id" => "acme"}}], _, _}
     end
   end
 end

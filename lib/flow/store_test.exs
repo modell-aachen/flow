@@ -839,24 +839,49 @@ defmodule Ariadne.Flow.StoreTest do
     @checkpoint_query [%{types: ["ItemAdded"]}]
 
     test "gives a reactor that has none the checkpoint it was declared at", %{store: store} do
-      assert :ok = Store.init_checkpoints(store, [%{name: "echo", position: 7}])
+      assert ["echo"] = Store.init_checkpoints(store, [%{name: "echo", position: 7}])
 
       assert Store.checkpoint(store, "echo") == 7
     end
 
     test "initializes every reactor of the set in one call", %{store: store} do
-      assert :ok =
-               Store.init_checkpoints(store, [
+      assert ["echo", "other"] =
+               store
+               |> Store.init_checkpoints([
                  %{name: "echo", position: 7},
                  %{name: "other", position: 0}
                ])
+               |> Enum.sort()
 
       assert Store.checkpoint(store, "echo") == 7
       assert Store.checkpoint(store, "other") == 0
     end
 
     test "accepts an empty set without touching the store", %{store: store} do
-      assert :ok = Store.init_checkpoints(store, [])
+      assert [] = Store.init_checkpoints(store, [])
+    end
+
+    test "reports nothing created when every checkpoint already exists", %{store: store} do
+      Store.init_checkpoints(store, [%{name: "echo", position: 7}, %{name: "other", position: 0}])
+
+      assert [] =
+               Store.init_checkpoints(store, [
+                 %{name: "echo", position: 7},
+                 %{name: "other", position: 0}
+               ])
+    end
+
+    test "reports only the checkpoints that were missing", %{store: store} do
+      Store.init_checkpoints(store, [%{name: "echo", position: 7}])
+
+      assert ["other"] =
+               Store.init_checkpoints(store, [
+                 %{name: "echo", position: 0},
+                 %{name: "other", position: 3}
+               ])
+
+      assert Store.checkpoint(store, "echo") == 7
+      assert Store.checkpoint(store, "other") == 3
     end
 
     # The declaration only ever says where a reactor that never ran begins, so an init
@@ -865,7 +890,7 @@ defmodule Ariadne.Flow.StoreTest do
       position = append_position!(store, "ItemAdded")
       consume!(store, "echo", @checkpoint_query)
 
-      assert :ok = Store.init_checkpoints(store, [%{name: "echo", position: 0}])
+      assert [] = Store.init_checkpoints(store, [%{name: "echo", position: 0}])
 
       assert Store.checkpoint(store, "echo") == position
     end
