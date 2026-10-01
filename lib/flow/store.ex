@@ -63,9 +63,7 @@ defmodule Ariadne.Flow.Store do
       [:ariadne, :flow, :store, :init_checkpoints],
       base_metadata,
       fn ->
-        created = module.init_checkpoints(config, checkpoints)
-
-        {created, %{checkpoint_count: length(checkpoints), created_count: length(created)},
+        {module.init_checkpoints(config, checkpoints), %{checkpoint_count: length(checkpoints)},
          base_metadata}
       end
     )
