@@ -68,10 +68,18 @@ defmodule Ariadne.Flow.Application do
     end
   end
 
-  def catch_up(%__MODULE__{store: store, reactors: reactors, scheduler: scheduler}, opts \\ []) do
-    %{reactors: reactors, scheduler: scheduler, metadata: Keyword.get(opts, :metadata, %{})}
-    |> Handoff.new()
+  def catch_up(%__MODULE__{store: store} = application, opts \\ []) do
+    application
+    |> out_of_band_handoff(opts)
     |> Handoff.catch_up(store)
+    |> Handoff.execute(store)
+    |> reactor_error()
+  end
+
+  def bootstrap_reactors(%__MODULE__{store: store} = application, opts \\ []) do
+    application
+    |> out_of_band_handoff(opts)
+    |> Handoff.bootstrap_reactors(store)
     |> Handoff.execute(store)
     |> reactor_error()
   end
@@ -92,6 +100,14 @@ defmodule Ariadne.Flow.Application do
               "reactors must be distinctly named, a name being what a checkpoint is keyed " <>
                 "on — repeated: #{Enum.map_join(repeated, ", ", &inspect(elem(&1, 0)))}"
     end
+  end
+
+  defp out_of_band_handoff(%__MODULE__{reactors: reactors, scheduler: scheduler}, opts) do
+    Handoff.new(%{
+      reactors: reactors,
+      scheduler: scheduler,
+      metadata: Keyword.get(opts, :metadata, %{})
+    })
   end
 
   defp append_and_hand_off(store, command_handler, handoff) do

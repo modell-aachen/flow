@@ -33,10 +33,15 @@ defmodule Ariadne.Flow.Store.InMemory.State do
 
   def checkpoint(%__MODULE__{checkpoints: checkpoints}, name), do: Map.get(checkpoints, name)
 
-  def init_checkpoints(%__MODULE__{} = state, checkpoints) do
-    Enum.reduce(checkpoints, state, fn %{name: name, position: position}, %__MODULE__{} = acc ->
-      %__MODULE__{acc | checkpoints: Map.put_new(acc.checkpoints, name, position)}
-    end)
+  def init_checkpoints(%__MODULE__{checkpoints: existing} = state, checkpoints) do
+    missing =
+      checkpoints
+      |> Enum.reject(&Map.has_key?(existing, &1.name))
+      |> Enum.uniq_by(& &1.name)
+
+    created = Map.new(missing, &{&1.name, &1.position})
+
+    {Enum.map(missing, & &1.name), %__MODULE__{state | checkpoints: Map.merge(existing, created)}}
   end
 
   def append(%__MODULE__{} = state, events, opts) when is_list(events) and is_list(opts) do

@@ -1,10 +1,11 @@
 # Application
 
-An event reducer on its own only *describes* what to do. The `Ariadne.Flow.Application` module is what drives a reducer against a store — it fetches the events the reducer needs, runs them through the reducer, and optionally appends new events. It provides three operations:
+An event reducer on its own only *describes* what to do. The `Ariadne.Flow.Application` module is what drives a reducer against a store — it fetches the events the reducer needs, runs them through the reducer, and optionally appends new events. It provides four operations:
 
 - `query/2` reads events from the store and folds them through a reducer.
 - `dispatch/3` does the same, and when the reducer's result is `{:ok, events}` it appends those events to the store.
 - `catch_up/2` involves no reducer at all: it drives the configured reactors from their own checkpoints, with no events of its own. See [catching up out of band](#catching-up-out-of-band).
+- `bootstrap_reactors/2` is the narrow form of it: it starts the reactors that have never run against this store, and nothing else. See [bootstrapping reactors](#bootstrapping-reactors).
 
 The examples below assume a `store` has already been set up. The store is covered in its own section — for now you can think of it as the place where events live.
 
@@ -167,7 +168,9 @@ Ariadne.Flow.Reactor.new(
 
 Writing the checkpoint with the events is what makes *from now* mean anything under concurrency. Appends serialise on the store's append lock and that lock is held until the dispatch commits, so the first dispatch to append is also the first to start the reactor, and a dispatch that lost the race finds the checkpoint already there and leaves it alone. It also means a reactor can never miss events because a run went astray: whatever happens to the run, the checkpoint sitting in front of those events is committed, and the next dispatch or [`catch_up/2`](#catching-up-out-of-band) delivers them.
 
-A reactor declaring history gets it from whoever runs it first, which may be a dispatch — that dispatch works through the whole history after committing, and the caller waits for it if the reactor is [synchronous](#synchronous-reactors). It is self-healing and happens once, but the way to keep it off a request is to run `catch_up/2` at deploy or boot, before there is a dispatch to lose the race to.
+A reactor is **new to a store** until its checkpoint is created there. Whichever call creates it — a dispatch, [`catch_up/2`](#catching-up-out-of-band) or [`bootstrap_reactors/2`](#bootstrapping-reactors) — is the one that starts the reactor, and exactly one ever is, because creating a checkpoint is an atomic "insert if missing" and the call that finds it already there is told so.
+
+A reactor declaring history that a dispatch starts works through that history on the dispatch's run, and nothing about the run is special: if the reactor is [synchronous](#synchronous-reactors), the caller waits for the whole history, because `sync: true` promises that the reactor is current when the dispatch returns and a first run is no exception. That wait can be long enough to [time out](#synchronous-reactors). The way to keep it off a request is to start the reactor with [`bootstrap_reactors/2`](#bootstrapping-reactors) at deploy or boot, before a dispatch gets the chance to be first.
 
 Every successful `dispatch/3` then drives the reactors nobody else will over the events they have not seen, in declaration order, **after the transaction has committed**. Nothing a reactor does can undo the dispatch: its transaction is closed and its events are in the store before the first handler is called. The fate of the dispatch depends on the command and nothing else.
 
@@ -213,6 +216,8 @@ When the timeout runs out, `dispatch/3` raises `Ariadne.Flow.PostCommitError` wi
 The wait is for the reactor to reach this dispatch's events, but a reactor resumes from wherever its checkpoint stands, so it reaches them by working through everything in between. A synchronous reactor that has fallen ten thousand events behind cannot confirm a new dispatch until it has drained all ten thousand — which makes a single lagging synchronous reactor a way to turn *every* subsequent dispatch into a timeout, and the reason a reactor declared synchronous belongs on a queue that keeps up with it. A `:timeout` `Ariadne.Flow.PostCommitError` naming the same reactor across unrelated dispatches is what that looks like from the outside.
 
 Each wait is reported as a `[:ariadne, :flow, :dispatch, :await]` telemetry span, with the reactors and positions it awaited, whether it ended `:confirmed` or in a `:timeout`, and how many rounds of checkpoint reads it took — so how long callers actually block, and how close to the timeout they come, is measurable before it turns into raises. Nothing is emitted for a dispatch with nothing to await.
+
+That includes a reactor's first run in a store: one that a dispatch [starts](#reactors) with a declared position has its whole history in front of the dispatch's events, and the dispatch waits for all of it. [`bootstrap_reactors/2`](#bootstrapping-reactors) at deploy is what spares a request that.
 
 A synchronous reactor that *fails* is a different outcome, and `Ariadne.Flow.PostCommitError` with `reason: :failure` is raised for it rather than the timeout being waited out — a definitive failure says more than a wait that could only run out. That holds for a failure the dispatch can see, which is any run Flow executed itself. A reactor that fails inside a job system's worker is invisible to the dispatch, which has nothing to do but wait: it times out, and the failure surfaces wherever the job system reports it.
 
@@ -274,7 +279,6 @@ iex> Ariadne.Flow.Application.catch_up(application)
 
 It answers what a dispatch structurally cannot:
 
-- **A new reactor over history.** A reactor declaring [`start_after_position: 0`](#reactors) has the whole store to work through before it is current. Calling `catch_up/2` at deploy or boot is what gets it there, instead of leaving the work to the next dispatch that happens along.
 - **A manual or scheduled retrigger.** A reactor parked in front of a poison event resumes once the cause is fixed — but only when something runs it. A cron calling `catch_up/2` is that something, and it does not need a write to hang the work off.
 - **Events another node appended.** Reactors are driven by the dispatch that produced the events, so a node that only reads never runs them. `catch_up/2` reacts to writes that happened elsewhere.
 - **Replay**, which is moving a checkpoint back and then catching up. Renaming the reactor does it today: the name is what its checkpoint is keyed on, and a handler that changed enough to need a replay is arguably a new reactor anyway. Truncating whatever effects the old one left behind is the caller's job.
@@ -289,6 +293,21 @@ Each configured reactor is built into a run and offered to the [scheduler](#the-
 Nesting says nothing here either. A catch-up has no events of its own to keep invisible, so one made inside a transaction the caller opened runs its reactors like any other — its consumed batches and its checkpoint writes simply join that transaction and are undone with it, the way every other store write inside it is.
 
 Running a catch-up while dispatches are happening needs no coordination from the caller. A reactor's events are consumed under a lock held per reactor, taken before its checkpoint is read and released when the new one is committed, so a post-dispatch run and a scheduled catch-up for the same reactor serialise against each other: whichever arrives second reads the first's committed checkpoint and continues from there, or finds nothing left and no-ops. Neither can move the checkpoint backwards, because a checkpoint is only ever created where it does not exist. Two catch-ups running at once are the same story.
+
+## Bootstrapping reactors
+
+`catch_up/2` drives every reactor that has a checkpoint, which is what a retrigger needs and far more than a deploy does. `bootstrap_reactors/2` asks the one question a deploy has: *which reactors have never run against this store?*
+
+```elixir
+iex> Ariadne.Flow.Application.bootstrap_reactors(application)
+:ok
+```
+
+It creates the checkpoint of every configured reactor that declared a position and has none, and runs the reactors whose checkpoint *this call* created, offered to the scheduler and executed by Flow if left unclaimed, exactly as `catch_up/2` runs them — nothing is awaited. Every other reactor is left alone: one that already has a checkpoint is up to date or will be brought there by the next dispatch, and a `:head` reactor is skipped as `catch_up/2` skips it, since *from now* needs a dispatch to define it. It takes `:metadata` and returns `:ok` or `{:error, %Ariadne.Flow.ReactorError{}}` exactly as `catch_up/2` does.
+
+That makes it the call to make at deploy or boot, once per store, so a new reactor's history is worked through before a dispatch has to bring it in — which, for a synchronous reactor, is a request waiting on the whole history. On a store where every reactor already has a checkpoint it is a single checkpoint insert that writes nothing and schedules nothing, so calling it after every deploy costs next to nothing. Which stores to call it on, and when, is the caller's — Flow knows the one store an application is built on and nothing beyond it.
+
+`catch_up/2` is unchanged by it and still the tool for everything else: a reactor parked on a poison event, events another node appended, a replay by rename.
 
 ## Concurrency
 
