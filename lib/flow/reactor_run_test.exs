@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.ReactorRunTest do
   use ExUnit.Case, async: true
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
@@ -72,6 +73,18 @@ defmodule Ariadne.Flow.ReactorRunTest do
     def reactor do
       Reactor.new(%{name: "rejects-zero", filter: %{types: [CountEvent]}}, fn
         _event, _metadata -> :ok
+      end)
+    end
+  end
+
+  defmodule ScopeReactor do
+    alias Ariadne.Flow.Reactor
+    alias Ariadne.Flow.ReactorRunTest.CountEvent
+
+    def reactor do
+      Reactor.new(%{name: "scope", filter: %{types: [CountEvent]}}, fn event, _metadata ->
+        send(Process.get(:inbox), {:handled_under, Process.get(:event_scope), event})
+        :ok
       end)
     end
   end
@@ -313,6 +326,44 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert_received {:got, "counts", %CountEvent{count: 1}, _}
       assert_received {:got, "counts", %CountEvent{count: 2}, _}
     end
+  end
+
+  describe "execute/3 with :around_event" do
+    test "handles each event inside around_event, which is handed that event's envelope" do
+      store = inbox_store()
+      Store.append(store, [count_store_event(1)], metadata: %{"trace_id" => "first"})
+      Store.append(store, [count_store_event(2)], metadata: %{"trace_id" => "second"})
+
+      assert :ok =
+               ReactorRun.execute(run(ScopeReactor), store, around_event: &scope_from_trace_id/2)
+
+      assert_received {:handled_under, "first", %CountEvent{count: 1}}
+      assert_received {:handled_under, "second", %CountEvent{count: 2}}
+    end
+
+    test "reports the failure of a handler it ran inside around_event" do
+      store = inbox_store()
+      Store.append(store, [count_store_event(1), count_store_event(0)])
+
+      assert {:error,
+              %ReactorError{failures: [%{name: "rejects-zero", reason: :zero_not_allowed}]}} =
+               ReactorRun.execute(run(RejectsZeroReactor), store,
+                 around_event: fn _envelope, handle -> handle.() end
+               )
+    end
+
+    test "refuses an around_event that is not a function of the envelope and the handling" do
+      store = inbox_store()
+
+      assert_raise ArgumentError, ~r/:around_event/, fn ->
+        ReactorRun.execute(run(CountsReactor), store, around_event: fn -> :ok end)
+      end
+    end
+  end
+
+  defp scope_from_trace_id(%Envelope{metadata: metadata}, handle) do
+    Process.put(:event_scope, metadata["trace_id"])
+    handle.()
   end
 
   defp count_store_event(count) do

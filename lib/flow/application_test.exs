@@ -5,6 +5,7 @@ defmodule Ariadne.Flow.ApplicationTest do
   alias Ariadne.Flow.CommandError
   alias Ariadne.Flow.CommandHandler
   alias Ariadne.Flow.Composite
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.PostCommitError
   alias Ariadne.Flow.Projection
   alias Ariadne.Flow.ReactorError
@@ -138,6 +139,21 @@ defmodule Ariadne.Flow.ApplicationTest do
         %{name: "sync-counts", filter: %{types: [CountEvent]}, sync: true},
         fn event, metadata ->
           send(Process.get(:inbox), {:got, "sync-counts", event, metadata})
+          :ok
+        end
+      )
+    end
+  end
+
+  defmodule ScopeHistoryReactor do
+    alias Ariadne.Flow.ApplicationTest.CountEvent
+    alias Ariadne.Flow.Reactor
+
+    def reactor do
+      Reactor.new(
+        %{name: "scope-history", filter: %{types: [CountEvent]}, start_after_position: 0},
+        fn event, _metadata ->
+          send(Process.get(:inbox), {:handled_under, Process.get(:event_scope), event})
           :ok
         end
       )
@@ -1191,6 +1207,72 @@ defmodule Ariadne.Flow.ApplicationTest do
 
       refute_received {:scheduled, _, _, _}
     end
+  end
+
+  describe "around_event" do
+    test "refuses an around_event that is not a function of the envelope and the handling" do
+      assert_raise ArgumentError, ~r/:around_event/, fn ->
+        Application.new(%{store: Store.InMemory.init(), around_event: fn -> :ok end})
+      end
+    end
+
+    test "dispatch/3 handles each event under its own metadata, not the dispatch's" do
+      store = store_with_traced_history()
+
+      assert {:ok, _} =
+               Application.dispatch(scoped_application(store), count_command(1),
+                 metadata: %{"trace_id" => "this-dispatch"}
+               )
+
+      assert_received {:handled_under, "earlier-dispatch", %CountEvent{count: 1}}
+      assert_received {:handled_under, "this-dispatch", %CountEvent{count: 2}}
+    end
+
+    test "catch_up/2 handles each event under its own metadata, not the catch-up's" do
+      store = store_with_traced_history()
+
+      assert :ok =
+               Application.catch_up(scoped_application(store),
+                 metadata: %{"trace_id" => "catch-up"}
+               )
+
+      assert_received {:handled_under, "earlier-dispatch", %CountEvent{count: 1}}
+    end
+
+    test "bootstrap_reactors/2 handles each event under its own metadata" do
+      store = store_with_traced_history()
+
+      assert :ok =
+               Application.bootstrap_reactors(scoped_application(store),
+                 metadata: %{"trace_id" => "bootstrap"}
+               )
+
+      assert_received {:handled_under, "earlier-dispatch", %CountEvent{count: 1}}
+    end
+  end
+
+  defp store_with_traced_history do
+    store = inbox_store()
+
+    {:ok, _} =
+      Application.dispatch(Application.new(%{store: store}), count_command(1),
+        metadata: %{"trace_id" => "earlier-dispatch"}
+      )
+
+    store
+  end
+
+  defp scoped_application(store) do
+    Application.new(%{
+      store: store,
+      reactors: [ScopeHistoryReactor],
+      around_event: &scope_from_trace_id/2
+    })
+  end
+
+  defp scope_from_trace_id(%Envelope{metadata: metadata}, handle) do
+    Process.put(:event_scope, metadata["trace_id"])
+    handle.()
   end
 
   describe "query/2" do

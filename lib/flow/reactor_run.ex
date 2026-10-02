@@ -10,6 +10,8 @@ defmodule Ariadne.Flow.ReactorRun do
   @enforce_keys [:reactor]
   defstruct [:reactor, metadata: %{}]
 
+  @around_event_hint ":around_event must be a function of the event's envelope and a zero-arity function handling it, got: "
+
   def new(%{reactor: reactor_module} = attrs) do
     %__MODULE__{reactor: reactor_module, metadata: Map.get(attrs, :metadata, %{})}
   end
@@ -29,18 +31,25 @@ defmodule Ariadne.Flow.ReactorRun do
     })
   end
 
-  def execute(%__MODULE__{reactor: reactor_module}, %Store{} = store) do
+  def execute(%__MODULE__{reactor: reactor_module}, %Store{} = store, opts \\ []) do
     reactor = reactor_module.reactor()
+    around_event = around_event!(Keyword.get(opts, :around_event))
 
     stored_event_reactor =
       StoredEventReactor.new(%{
         name: reactor.name,
         query: Reactor.query(reactor),
-        handler: fn events -> run_handler(reactor, events) end
+        handler: fn events -> run_handler(reactor, events, around_event) end
       })
 
     catch_up(store, stored_event_reactor)
   end
+
+  def around_event!(nil), do: &handle_directly/2
+  def around_event!(around_event) when is_function(around_event, 2), do: around_event
+
+  def around_event!(around_event),
+    do: raise(ArgumentError, @around_event_hint <> inspect(around_event))
 
   defp catch_up(store, %StoredEventReactor{name: name} = stored_event_reactor) do
     case Store.consume(store, stored_event_reactor) do
@@ -55,9 +64,11 @@ defmodule Ariadne.Flow.ReactorRun do
     end
   end
 
-  defp run_handler(reactor, events) do
+  defp handle_directly(_envelope, handle), do: handle.()
+
+  defp run_handler(reactor, events, around_event) do
     Enum.reduce_while(events, {:ok, 0}, fn seq, {:ok, count} ->
-      case Reactor.handle(reactor, Codec.deserialize(seq)) do
+      case handle(reactor, seq, around_event) do
         :ok ->
           {:cont, {:ok, count + 1}}
 
@@ -65,5 +76,11 @@ defmodule Ariadne.Flow.ReactorRun do
           {:halt, {:error, count, %{event: seq, reason: reason}}}
       end
     end)
+  end
+
+  defp handle(reactor, seq, around_event) do
+    envelope = Codec.deserialize(seq)
+
+    around_event.(envelope, fn -> Reactor.handle(reactor, envelope) end)
   end
 end
