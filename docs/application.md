@@ -186,6 +186,29 @@ A failure stops nothing else. Every reactor declared after a failing one is stil
 
 Only a **synchronous** reactor's failure reaches the caller, because a caller declared it wanted to read that reactor's work back. See below.
 
+### Handling each event under its own context
+
+A run is not one dispatch's worth of events. It resumes from the reactor's checkpoint and consumes everything past it, so a single run regularly handles events that several dispatches appended — a job that was already queued when a second dispatch came along, a reactor catching up after a failure, a [`catch_up/2`](#catching-up-out-of-band). Context taken from the run, such as the dispatch metadata a scheduler's job carries, therefore belongs to *one* of those dispatches, and handling every event under it attributes the others' work to the wrong request.
+
+The context an event was recorded under is its own [metadata](#metadata), and `:around_event` is where it is put back in place. It is a function of the event's `Ariadne.Flow.Envelope` and a zero-arity function that handles the event, and it must return what that function returns:
+
+```elixir
+around_event = fn %Ariadne.Flow.Envelope{metadata: metadata}, handle ->
+  previous = Logger.metadata()[:trace_id]
+  Logger.metadata(trace_id: metadata["trace_id"] || previous)
+
+  try do
+    handle.()
+  after
+    Logger.metadata(trace_id: previous)
+  end
+end
+
+Ariadne.Flow.Application.new(%{store: store, reactors: [CourseSize], around_event: around_event})
+```
+
+Configured on `new/1`, it wraps every event of every run Flow executes itself — after a dispatch, in `catch_up/2` and in `bootstrap_reactors/2`. A run a [scheduler](#the-scheduler) took executes in its worker, which passes the same function to `Ariadne.Flow.ReactorRun.execute/3`. Without one, each event is handled directly. Anything but a two-arity function raises `ArgumentError`.
+
 ## Synchronous reactors
 
 A reactor may declare that a dispatch must not return before it has caught up with the events that dispatch appended. Passing `sync: true` marks it synchronous; the default is asynchronous.
@@ -261,10 +284,12 @@ The worker on the other side rebuilds the run and executes it:
 ```elixir
 args = Ariadne.Flow.ReactorRun.dump(run)   # in schedule/3
 # ... later, in the worker:
-args |> Ariadne.Flow.ReactorRun.load() |> Ariadne.Flow.ReactorRun.execute(store)
+args
+|> Ariadne.Flow.ReactorRun.load()
+|> Ariadne.Flow.ReactorRun.execute(store, around_event: around_event)
 ```
 
-The dump carries the dispatch metadata, so context the worker needs (correlation IDs, tenancy) crosses the boundary with the run rather than beside it. `Ariadne.Flow` itself knows nothing about queueing or retries — that is entirely the scheduler's concern. `Ariadne.Flow.ReactorRun.sync?/1` says whether a dispatch is waiting on this run, which is worth knowing when choosing a queue, but it is not an instruction about where to run it.
+The dump carries the dispatch metadata, so context the whole run needs (tenancy) crosses the boundary with the run rather than beside it. Context that belongs to a single event, a correlation ID above all, comes from that event's own metadata through [`:around_event`](#handling-each-event-under-its-own-context): the run may be handling events other dispatches appended. `Ariadne.Flow` itself knows nothing about queueing or retries — that is entirely the scheduler's concern. `Ariadne.Flow.ReactorRun.sync?/1` says whether a dispatch is waiting on this run, which is worth knowing when choosing a queue, but it is not an instruction about where to run it.
 
 **There is no default scheduler.** Without one, every run is Flow's own to execute after the commit, which is the whole library working out of the box — including synchronous reactors, whose checkpoint is advanced before the wait begins, so the first look confirms and nothing ever sleeps.
 

@@ -60,14 +60,14 @@ defmodule Ariadne.Flow.Handoff do
     |> unscheduled(handoff, store)
   end
 
-  def execute(reactor_runs, %Store{} = store) when is_list(reactor_runs) do
-    Enum.flat_map(reactor_runs, &report(failures(&1, store)))
+  def execute(reactor_runs, %Store{} = store, opts \\ []) when is_list(reactor_runs) do
+    Enum.flat_map(reactor_runs, &report(failures(&1, store, opts)))
   end
 
   def summarize(failures), do: Enum.map(failures, &Map.take(&1, [:name, :position, :reason]))
 
-  defp failures(reactor_run, store) do
-    case ReactorRun.execute(reactor_run, store) do
+  defp failures(reactor_run, store, opts) do
+    case ReactorRun.execute(reactor_run, store, opts) do
       :ok ->
         []
 

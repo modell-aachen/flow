@@ -13,18 +13,19 @@ defmodule Ariadne.Flow.Application do
   alias Ariadne.Flow.Scheduler
   alias Ariadne.Flow.Store
 
-  defstruct [:store, reactors: [], scheduler: nil]
+  defstruct [:store, :around_event, reactors: [], scheduler: nil]
 
   def new(%{store: %Store{} = store} = attrs) do
     %__MODULE__{
       store: store,
       reactors: distinctly_named(Map.get(attrs, :reactors, [])),
-      scheduler: Scheduler.normalize(Map.get(attrs, :scheduler))
+      scheduler: Scheduler.normalize(Map.get(attrs, :scheduler)),
+      around_event: ReactorRun.around_event!(Map.get(attrs, :around_event))
     }
   end
 
   def dispatch(
-        %__MODULE__{store: store, reactors: reactors, scheduler: scheduler},
+        %__MODULE__{store: store, reactors: reactors, scheduler: scheduler} = application,
         command,
         opts \\ []
       ) do
@@ -54,7 +55,7 @@ defmodule Ariadne.Flow.Application do
       {committed, attempted} =
         Attempts.run(attempts, fn -> append_and_hand_off(store, command_handler, handoff) end)
 
-      result = react(committed, store, consistency, nested)
+      result = react(committed, application, consistency, nested)
 
       {result, %{attempts: attempted}, %{result: outcome(result)}}
     end)
@@ -72,7 +73,7 @@ defmodule Ariadne.Flow.Application do
     application
     |> out_of_band_handoff(opts)
     |> Handoff.catch_up(store)
-    |> Handoff.execute(store)
+    |> execute(application)
     |> reactor_error()
   end
 
@@ -80,7 +81,7 @@ defmodule Ariadne.Flow.Application do
     application
     |> out_of_band_handoff(opts)
     |> Handoff.bootstrap_reactors(store)
-    |> Handoff.execute(store)
+    |> execute(application)
     |> reactor_error()
   end
 
@@ -118,15 +119,18 @@ defmodule Ariadne.Flow.Application do
     end)
   end
 
-  defp react({:ok, result, reactor_runs}, store, consistency, nested) do
+  defp react({:ok, result, reactor_runs}, application, consistency, nested) do
     reactor_runs
-    |> Handoff.execute(store)
+    |> execute(application)
     |> surface(nested)
 
-    await({:ok, result}, consistency, store)
+    await({:ok, result}, consistency, application.store)
   end
 
-  defp react(result, _store, _consistency, _nested), do: result
+  defp react(result, _application, _consistency, _nested), do: result
+
+  defp execute(reactor_runs, %__MODULE__{store: store, around_event: around_event}),
+    do: Handoff.execute(reactor_runs, store, around_event: around_event)
 
   defp surface(failures, nested) do
     case Enum.filter(failures, &ReactorRun.sync?(&1.run)) do
