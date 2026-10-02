@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/modell-aachen/flow/compare/v0.11.0...v0.11.1) (2026-10-02)
+
+
+### Features
+
+* handle each event under its own context ([2f12a4c](https://github.com/modell-aachen/flow/commit/2f12a4c3fe3a2d3bb9c4e76e3e703e782887f34d))
+* handle each event under its own context ([96118da](https://github.com/modell-aachen/flow/commit/96118daf85d6710fa65e91465bb94d35a256ec49))
+
 ## [0.11.0](https://github.com/modell-aachen/flow/compare/v0.10.2...v0.11.0) (2026-10-01)
 
 
