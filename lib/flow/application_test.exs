@@ -998,78 +998,31 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
     end
 
-    test "defers the hook of a nested run until the outer transaction commits" do
+    test "does not fail the dispatch over a raising hook, the reactor's work committed" do
       store = inbox_store()
 
-      {:ok, %{events: [%{metadata: %{position: position}}]}} =
-        Store.transaction(store, fn ->
-          result = Application.dispatch(reporting_application(store), count_command(1))
-          refute_received {:after_run, _, _, _}
-          result
-        end)
+      application =
+        Application.new(%{
+          store: store,
+          reactors: [SyncCountsReactor],
+          after_reactor_run: fn _reactor_module, _position, _results -> raise "hook broke" end
+        })
 
-      assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
+      assert {:ok, %{events: [%{metadata: %{position: position}}]}} =
+               Application.dispatch(application, count_command(1))
+
+      assert Store.checkpoint(store, "sync-counts") == position
     end
 
-    test "drops the deferred hook when the outer transaction rolls back" do
+    test "calls the hook of a nested run inside the caller's transaction" do
       store = postgres_store()
 
-      assert {:error, :undone} =
-               Store.transaction(store, fn ->
-                 Application.dispatch(reporting_application(store), count_command(1))
-                 Repo.rollback(:undone)
-               end)
-
-      refute_received {:after_run, _, _, _}
-    end
-
-    test "drops the deferred hook when the outer transaction raises" do
-      store = inbox_store()
-
-      assert_raise RuntimeError, "abandoned", fn ->
-        Store.transaction(store, fn ->
+      Repo.transaction(fn ->
+        {:ok, %{events: [%{metadata: %{position: position}}]}} =
           Application.dispatch(reporting_application(store), count_command(1))
-          raise "abandoned"
-        end)
-      end
 
-      refute_received {:after_run, _, _, _}
-    end
-
-    test "refuses a run nested in an in-memory transaction it cannot see commit" do
-      store = inbox_store()
-
-      assert_raise PostCommitError, ~r/Store.transaction\/2/, fn ->
-        Store.InMemory.transaction(store.config, fn ->
-          Application.dispatch(reporting_application(store), count_command(1))
-        end)
-      end
-
-      refute_received {:after_run, _, _, _}
-    end
-
-    test "refuses a run nested in a bare repo transaction it cannot see commit" do
-      store = postgres_store()
-
-      assert_raise PostCommitError, ~r/Store.transaction\/2/, fn ->
-        Repo.transaction(fn ->
-          Application.dispatch(reporting_application(store), count_command(1))
-        end)
-      end
-
-      refute_received {:after_run, _, _, _}
-    end
-
-    test "leaves a dispatch without a hook free to nest in a transaction it did not open" do
-      store = inbox_store()
-      application = Application.new(%{store: store, reactors: [SyncCountsReactor]})
-
-      assert {:ok, _} =
-               Store.InMemory.transaction(store.config, fn ->
-                 Application.dispatch(application, count_command(1))
-               end)
-
-      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
+        assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
+      end)
     end
   end
 
