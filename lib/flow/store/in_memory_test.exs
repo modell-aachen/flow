@@ -23,7 +23,7 @@ defmodule Ariadne.Flow.Store.InMemoryTest do
             send(test_pid, :holding)
 
             receive do
-              :release -> {:ok, length(events)}
+              :release -> {:ok, Enum.map(events, & &1.position)}
             end
           end)
         end)
@@ -34,7 +34,7 @@ defmodule Ariadne.Flow.Store.InMemoryTest do
         Task.async(fn ->
           consume(store, "echo", fn events ->
             send(test_pid, {:waiter_saw, Enum.map(events, & &1.position)})
-            {:ok, length(events)}
+            {:ok, Enum.map(events, & &1.position)}
           end)
         end)
 
@@ -61,7 +61,11 @@ defmodule Ariadne.Flow.Store.InMemoryTest do
 
       assert_receive :holding
 
-      waiter = Task.async(fn -> consume(store, "echo", &{:ok, length(&1)}) end)
+      waiter =
+        Task.async(fn ->
+          consume(store, "echo", &{:ok, Enum.map(&1, fn event -> event.position end)})
+        end)
+
       Process.exit(holder, :kill)
 
       assert %ConsumeResult{processed: 1, last_position: ^position} = Task.await(waiter)
@@ -74,10 +78,14 @@ defmodule Ariadne.Flow.Store.InMemoryTest do
 
       nesting_handler = fn events ->
         if Process.put(:nested, true) == nil do
-          send(test_pid, {:nested, consume(store, "echo", &{:ok, length(&1)})})
+          send(
+            test_pid,
+            {:nested,
+             consume(store, "echo", &{:ok, Enum.map(&1, fn event -> event.position end)})}
+          )
         end
 
-        {:ok, length(events)}
+        {:ok, Enum.map(events, & &1.position)}
       end
 
       assert %ConsumeResult{processed: 1} = consume(store, "echo", nesting_handler)

@@ -11,6 +11,11 @@ defmodule Ariadne.Flow.Store do
 
   @type t :: %__MODULE__{module: module(), config: Backend.config()}
 
+  @after_commit_key :"$ariadne_flow_after_commit"
+  @foreign_transaction_hint "a function deferred to a commit needs a transaction Flow can see " <>
+                              "commit, but this one was opened outside Ariadne.Flow.Store — " <>
+                              "open the outer transaction with Store.transaction/2 instead"
+
   @doc """
   Reads the events matching `query` and returns them as an `Ariadne.Flow.Store.Read` —
   the events together with the normalised query that selected them, so a dispatch
@@ -69,8 +74,31 @@ defmodule Ariadne.Flow.Store do
     )
   end
 
-  def transaction(%__MODULE__{module: module, config: config}, fun) when is_function(fun, 0) do
-    module.transaction(config, fun)
+  def transaction(%__MODULE__{module: module, config: config} = store, fun)
+      when is_function(fun, 0) do
+    if owns_outermost_transaction?(store),
+      do: outermost_transaction(store, fun),
+      else: module.transaction(config, fun)
+  end
+
+  def after_commit(%__MODULE__{} = store, fun) when is_function(fun, 0) do
+    case ensure_after_commit!(store) do
+      :now ->
+        fun.()
+        :ok
+
+      :queued ->
+        Process.put(@after_commit_key, [fun | Process.get(@after_commit_key)])
+        :ok
+    end
+  end
+
+  def ensure_after_commit!(%__MODULE__{} = store) do
+    cond do
+      not in_transaction?(store) -> :now
+      Process.get(@after_commit_key) -> :queued
+      true -> raise ArgumentError, @foreign_transaction_hint
+    end
   end
 
   @doc """
@@ -105,6 +133,31 @@ defmodule Ariadne.Flow.Store do
         {result, measurements, metadata}
       end
     )
+  end
+
+  defp owns_outermost_transaction?(store),
+    do: Process.get(@after_commit_key) == nil and not in_transaction?(store)
+
+  defp outermost_transaction(%__MODULE__{module: module, config: config}, fun) do
+    committed = make_ref()
+    tagged = fn -> {committed, fun.()} end
+
+    case collecting_after_commit(fn -> module.transaction(config, tagged) end) do
+      {{^committed, value}, queued} ->
+        Enum.each(Enum.reverse(queued), & &1.())
+        value
+
+      {rolled_back, _queued} ->
+        rolled_back
+    end
+  end
+
+  defp collecting_after_commit(transaction) do
+    Process.put(@after_commit_key, [])
+    result = transaction.()
+    {result, Process.get(@after_commit_key)}
+  after
+    Process.delete(@after_commit_key)
   end
 
   defp validate_append_condition(opts) do

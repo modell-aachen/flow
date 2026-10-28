@@ -86,8 +86,8 @@ defmodule Ariadne.Flow.Store.Backend do
   Where the batch starts is the reactor's stored checkpoint, or the store's origin when
   it has none — a reactor is given a checkpoint by `c:init_checkpoints/2` before anything
   runs it, so the origin is the resume point of a reactor nobody ever declared. The
-  handler reports back how many events of the batch it processed, and the new checkpoint
-  is the position of the last of those — a handler that fails part-way through leaves the
+  handler reports back a result for each event of the batch it processed, and the new
+  checkpoint is the position of the last of those — a handler that fails part-way through leaves the
   rest to be delivered again. The batch size is the backend's own choice.
 
   The handler runs in the calling process, inside a transaction on this store, with the

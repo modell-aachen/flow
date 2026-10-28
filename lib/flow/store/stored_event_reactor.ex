@@ -8,13 +8,8 @@ defmodule Ariadne.Flow.Store.StoredEventReactor do
 
   @query_hint_only_last_event "A reactor's query cannot ask for only_last_event — every event it leaves out is checkpointed past and never delivered"
 
-  @typedoc """
-  Processes a batch of events and reports how many of them it got through, so the
-  store knows where to set the reactor's checkpoint.
-  """
   @type handler ::
-          ([SequencedRecord.t()] ->
-             {:ok, non_neg_integer()} | {:error, non_neg_integer(), term()})
+          ([SequencedRecord.t()] -> {:ok, [term()]} | {:error, [term()], term()})
 
   @type t :: %__MODULE__{name: String.t(), query: Query.t(), handler: handler()}
 

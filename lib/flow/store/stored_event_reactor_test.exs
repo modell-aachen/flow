@@ -29,7 +29,7 @@ defmodule Ariadne.Flow.Store.StoredEventReactorTest do
   defp new(attrs) do
     attrs
     |> Map.put_new(:name, "echo")
-    |> Map.put_new(:handler, fn _events -> {:ok, 0} end)
+    |> Map.put_new(:handler, fn _events -> {:ok, []} end)
     |> StoredEventReactor.new()
   end
 end

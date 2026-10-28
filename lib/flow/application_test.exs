@@ -367,6 +367,15 @@ defmodule Ariadne.Flow.ApplicationTest do
         Application.new(%{store: store, reactors: [CountsReactor, CountsReactor]})
       end
     end
+
+    test "refuses an after_reactor_run that is not a function of three arguments" do
+      assert_raise ArgumentError, ~r/:after_reactor_run/, fn ->
+        Application.new(%{
+          store: Store.InMemory.init(),
+          after_reactor_run: fn _results -> :ok end
+        })
+      end
+    end
   end
 
   describe "dispatch/3" do
@@ -977,6 +986,103 @@ defmodule Ariadne.Flow.ApplicationTest do
 
       assert_received {:scheduled, [%ReactorRun{reactor: SyncCountsReactor}], _store, _opts}
     end
+  end
+
+  describe "dispatch/3 with an after_reactor_run hook" do
+    test "calls the hook with the reactor's saved checkpoint once its run committed" do
+      store = inbox_store()
+
+      assert {:ok, %{events: [%{metadata: %{position: position}}]}} =
+               Application.dispatch(reporting_application(store), count_command(1))
+
+      assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
+    end
+
+    test "defers the hook of a nested run until the outer transaction commits" do
+      store = inbox_store()
+
+      {:ok, %{events: [%{metadata: %{position: position}}]}} =
+        Store.transaction(store, fn ->
+          result = Application.dispatch(reporting_application(store), count_command(1))
+          refute_received {:after_run, _, _, _}
+          result
+        end)
+
+      assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
+    end
+
+    test "drops the deferred hook when the outer transaction rolls back" do
+      store = postgres_store()
+
+      assert {:error, :undone} =
+               Store.transaction(store, fn ->
+                 Application.dispatch(reporting_application(store), count_command(1))
+                 Repo.rollback(:undone)
+               end)
+
+      refute_received {:after_run, _, _, _}
+    end
+
+    test "drops the deferred hook when the outer transaction raises" do
+      store = inbox_store()
+
+      assert_raise RuntimeError, "abandoned", fn ->
+        Store.transaction(store, fn ->
+          Application.dispatch(reporting_application(store), count_command(1))
+          raise "abandoned"
+        end)
+      end
+
+      refute_received {:after_run, _, _, _}
+    end
+
+    test "refuses a run nested in an in-memory transaction it cannot see commit" do
+      store = inbox_store()
+
+      assert_raise PostCommitError, ~r/Store.transaction\/2/, fn ->
+        Store.InMemory.transaction(store.config, fn ->
+          Application.dispatch(reporting_application(store), count_command(1))
+        end)
+      end
+
+      refute_received {:after_run, _, _, _}
+    end
+
+    test "refuses a run nested in a bare repo transaction it cannot see commit" do
+      store = postgres_store()
+
+      assert_raise PostCommitError, ~r/Store.transaction\/2/, fn ->
+        Repo.transaction(fn ->
+          Application.dispatch(reporting_application(store), count_command(1))
+        end)
+      end
+
+      refute_received {:after_run, _, _, _}
+    end
+
+    test "leaves a dispatch without a hook free to nest in a transaction it did not open" do
+      store = inbox_store()
+      application = Application.new(%{store: store, reactors: [SyncCountsReactor]})
+
+      assert {:ok, _} =
+               Store.InMemory.transaction(store.config, fn ->
+                 Application.dispatch(application, count_command(1))
+               end)
+
+      assert_received {:got, "sync-counts", %CountEvent{count: 1}, _}
+    end
+  end
+
+  defp reporting_application(store) do
+    inbox = self()
+
+    Application.new(%{
+      store: store,
+      reactors: [SyncCountsReactor],
+      after_reactor_run: fn reactor_module, position, results ->
+        send(inbox, {:after_run, reactor_module, position, results})
+      end
+    })
   end
 
   describe "dispatch!/3" do

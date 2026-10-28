@@ -146,6 +146,8 @@ application =
   Ariadne.Flow.Application.new(%{store: store, reactors: [CourseSize]})
 ```
 
+A handler returns `:ok` or `{:ok, result}` once it has handled the event, and `{:error, reason}` when it could not. Flow does not interpret `result` — it is whatever the application wants to learn about the event once the run's work is committed, such as the read-model rows it touched — and only hands it on to [`:after_reactor_run`](#learning-what-a-run-committed). A plain `:ok` counts as `{:ok, nil}`.
+
 The `name` is what the checkpoint is keyed on, so it must be stable across versions. The `reactor/0` convention is part of the public contract: the module name is all that identifies a reactor, which lets a reactor run be serialised and handed to a job system.
 
 The `filter` is an `Ariadne.Flow.Filter` like a projection's, with one exception: a reactor reacts to every event it matches, so it cannot ask for [`only_last_event`](event_reducer.html#reducing-the-last-event-only) — the events it skipped would be checkpointed past and never delivered. `Reactor.new/2` raises `ArgumentError` on such a filter, as it does on anything else it is constructed wrongly with.
@@ -209,6 +211,24 @@ Ariadne.Flow.Application.new(%{store: store, reactors: [CourseSize], around_even
 
 Configured on `new/1`, it wraps every event of every run Flow executes itself — after a dispatch, in `catch_up/2` and in `bootstrap_reactors/2`. A run a [scheduler](#the-scheduler) took executes in its worker, which passes the same function to `Ariadne.Flow.ReactorRun.execute/3`. Without one, each event is handled directly. Anything but a two-arity function raises `ArgumentError`.
 
+### Learning what a run committed
+
+A reactor that maintains a read model commits its rows and its checkpoint in one transaction, so the checkpoint is the read model's version: data read together with it contains exactly the events up to it, and it never moves backwards. `:after_reactor_run` is how the application learns that such a transaction committed — to tell the clients rendering the read model to read it again, say. It is a function of the reactor module, the checkpoint the run saved, and the handler results of the events that run committed, in position order:
+
+```elixir
+after_reactor_run = fn reactor_module, checkpoint, results ->
+  Phoenix.PubSub.broadcast(MyApp.PubSub, "read_models", {reactor_module, checkpoint, results})
+end
+
+Ariadne.Flow.Application.new(%{store: store, reactors: [CourseSize], after_reactor_run: after_reactor_run})
+```
+
+It is called once per consumed batch that committed at least one event, so it always gets the checkpoint that batch saved, and never for a run that processed nothing, whose checkpoint did not move. The results include every committed event — `nil` for those whose handler returned `:ok` — so the hook sees the whole batch and decides for itself what it has no use for. A batch that stopped on a failing event still calls it with the events before the failure, which were committed; the failing event and those after it are not passed.
+
+The call comes **after the commit**, so a client rereading on the signal never sees the state before it. A run outside any transaction calls the hook as soon as its consume has committed. A run [nested](#nesting) in a transaction opened with `Ariadne.Flow.Store.transaction/2` has committed nothing until that transaction does, so the call is deferred to its commit and dropped if it rolls back. A run nested in a transaction Flow did not open — a bare `Repo.transaction` — cannot be told apart from one about to roll back, because Ecto has no after-commit callback; it raises `ArgumentError` before consuming anything, and the fix is to open the outer transaction with `Ariadne.Flow.Store.transaction/2`. Without a hook, nesting works under any transaction as before.
+
+A hook that raises, exits or throws is logged and the run carries on: the checkpoint is already committed and stays where it is. Configured on `new/1`, it applies to every run Flow executes itself, like `:around_event`, and a scheduler's worker passes it to `Ariadne.Flow.ReactorRun.execute/3`. Anything but `nil` or a three-arity function raises `ArgumentError`.
+
 ## Synchronous reactors
 
 A reactor may declare that a dispatch must not return before it has caught up with the events that dispatch appended. Passing `sync: true` marks it synchronous; the default is asynchronous.
@@ -253,6 +273,8 @@ A dispatch made inside a transaction the *caller* opened cannot wait for a sched
 - **Synchronous runs are never offered to the scheduler.** Flow executes them itself, in the caller's transaction, where the uncommitted events are visible. The confirmation comes with the execution rather than being waited for, so the dispatch waits for nothing. What it gives up is the job system for them, and the isolation that comes with a committed transaction: a synchronous reactor that fails here raises inside the caller's transaction, and what that does to the caller's work is the caller's to decide. The `Ariadne.Flow.PostCommitError` says so — it carries `nested: true` and drops the usual "never re-dispatch", because letting the raise propagate rolls the events back with everything else the caller was doing, and the command can then be dispatched again.
 - **Asynchronous runs are offered to the scheduler as usual and never executed.** A job row inserted in the outer transaction runs after that transaction commits, which is exactly when the next dispatch or `catch_up/2` would have picked the same events up. Whether a scheduler is configured or not, the work lands in the same place — so nesting behaves the same under every scheduler.
 
+A synchronous run executed here has committed nothing until the caller's transaction does, so its [`:after_reactor_run`](#learning-what-a-run-committed) call waits for that commit — which Flow can only see when the caller opened the transaction with `Ariadne.Flow.Store.transaction/2`. Under a transaction opened any other way, an application with that hook raises `ArgumentError` rather than signal a commit that may never happen.
+
 ## The scheduler
 
 The `scheduler` is an `Ariadne.Flow.Scheduler`, and it does what the name says and nothing more: it enqueues runs durably, it never executes them. It is configured on `new/1`, making the application struct the complete description of a context's flow setup: store, reactors, and scheduler.
@@ -286,7 +308,10 @@ args = Ariadne.Flow.ReactorRun.dump(run)   # in schedule/3
 # ... later, in the worker:
 args
 |> Ariadne.Flow.ReactorRun.load()
-|> Ariadne.Flow.ReactorRun.execute(store, around_event: around_event)
+|> Ariadne.Flow.ReactorRun.execute(store,
+  around_event: around_event,
+  after_reactor_run: after_reactor_run
+)
 ```
 
 The dump carries the dispatch metadata, so context the whole run needs (tenancy) crosses the boundary with the run rather than beside it. Context that belongs to a single event, a correlation ID above all, comes from that event's own metadata through [`:around_event`](#handling-each-event-under-its-own-context): the run may be handling events other dispatches appended. `Ariadne.Flow` itself knows nothing about queueing or retries — that is entirely the scheduler's concern. `Ariadne.Flow.ReactorRun.sync?/1` says whether a dispatch is waiting on this run, which is worth knowing when choosing a queue, but it is not an instruction about where to run it.

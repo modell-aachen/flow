@@ -469,11 +469,12 @@ defmodule Ariadne.Flow.StoreTest do
     @item_added [%{types: ["ItemAdded"]}]
 
     test "returns empty result when there are no matching events", %{store: store} do
-      handler = fn _events -> {:ok, 0} end
+      handler = fn _events -> {:ok, []} end
 
       assert %ConsumeResult{
                status: :ok,
                processed: 0,
+               results: [],
                last_position: 0,
                more?: false,
                failure: nil
@@ -509,6 +510,19 @@ defmodule Ariadne.Flow.StoreTest do
       assert_received {:got, "echo", %SequencedRecord{position: p3}}
       assert p1 < p2
       assert p2 < p3
+    end
+
+    test "reports the handler's result for each event it got through", %{store: store} do
+      first = append_position!(store, "ItemAdded")
+      second = append_position!(store, "ItemAdded")
+
+      handler = fn events -> {:ok, Enum.map(events, &{:handled, &1.position})} end
+
+      assert %ConsumeResult{processed: 2, results: [{:handled, ^first}, {:handled, ^second}]} =
+               Store.consume(
+                 store,
+                 StoredEventReactor.new(%{name: "echo", query: @item_added, handler: handler})
+               )
     end
 
     test "normalises the reactor's query before dispatching to the backend", %{store: store} do
@@ -645,18 +659,14 @@ defmodule Ariadne.Flow.StoreTest do
       append!(store, "ItemAdded", ["id:2"])
 
       failing_handler = fn events ->
-        Enum.reduce_while(events, {:ok, 0}, fn seq, {:ok, count} ->
-          if "id:0" in seq.record.tags do
-            {:halt, {:error, count, %{event: seq, reason: :zero_not_allowed}}}
-          else
-            {:cont, {:ok, count + 1}}
-          end
-        end)
+        {handled, [failing | _rest]} = Enum.split_while(events, &("id:0" not in &1.record.tags))
+        {:error, Enum.map(handled, & &1.position), %{event: failing, reason: :zero_not_allowed}}
       end
 
       assert %ConsumeResult{
                status: :error,
                processed: 1,
+               results: [first_position],
                last_position: last_position,
                more?: false,
                failure: %{
@@ -673,9 +683,9 @@ defmodule Ariadne.Flow.StoreTest do
                  })
                )
 
-      assert last_position > 0
+      assert last_position == first_position
 
-      success_handler = fn events -> {:ok, length(events)} end
+      success_handler = fn events -> {:ok, Enum.map(events, & &1.position)} end
 
       assert %ConsumeResult{status: :ok, processed: 2, more?: false} =
                Store.consume(
@@ -692,7 +702,7 @@ defmodule Ariadne.Flow.StoreTest do
       batch_size = 100
       Enum.each(1..(batch_size + 5), fn _ -> append!(store, "ItemAdded") end)
 
-      handler = fn events -> {:ok, length(events)} end
+      handler = fn events -> {:ok, Enum.map(events, & &1.position)} end
 
       assert %ConsumeResult{status: :ok, processed: ^batch_size, more?: true} =
                Store.consume(
@@ -715,7 +725,7 @@ defmodule Ariadne.Flow.StoreTest do
 
       capturing_handler = fn events ->
         Enum.each(events, fn seq -> send(self(), {:saw, seq.record.type}) end)
-        {:ok, length(events)}
+        {:ok, Enum.map(events, & &1.position)}
       end
 
       assert %ConsumeResult{processed: 2} =
@@ -742,7 +752,7 @@ defmodule Ariadne.Flow.StoreTest do
         send(test_pid, {:in_transaction?, Store.in_transaction?(store)})
         append!(store, "ItemAdded")
 
-        {:ok, length(events)}
+        {:ok, Enum.map(events, & &1.position)}
       end
 
       assert %ConsumeResult{status: :ok, processed: 1, last_position: ^position} =
@@ -1018,6 +1028,102 @@ defmodule Ariadne.Flow.StoreTest do
     end
   end
 
+  describe "after_commit/2" do
+    test "runs the function at once outside a transaction", %{store: store} do
+      assert :ok = Store.after_commit(store, notify(:committed))
+
+      assert_received :committed
+    end
+
+    test "runs the function once the outermost transaction committed", %{store: store} do
+      assert :ok =
+               Store.transaction(store, fn ->
+                 Store.transaction(store, fn -> Store.after_commit(store, notify(:committed)) end)
+                 refute_received :committed
+                 :ok
+               end)
+
+      assert_received :committed
+    end
+
+    test "runs the function after a commit whose function returned an error", %{store: store} do
+      assert {:error, :refused} =
+               Store.transaction(store, fn ->
+                 Store.after_commit(store, notify(:committed))
+                 {:error, :refused}
+               end)
+
+      assert_received :committed
+    end
+
+    test "runs queued functions in the order they were queued", %{store: store} do
+      Store.transaction(store, fn ->
+        Store.after_commit(store, notify(:first))
+        Store.after_commit(store, notify(:second))
+      end)
+
+      assert [:first, :second] = Enum.map(1..2, fn _ -> next_queued() end)
+    end
+
+    test "drops the function when the transaction raises", %{store: store} do
+      assert_raise RuntimeError, "boom", fn ->
+        Store.transaction(store, fn ->
+          Store.after_commit(store, notify(:committed))
+          raise "boom"
+        end)
+      end
+
+      refute_received :committed
+    end
+
+    test "leaves the next transaction without the dropped functions", %{store: store} do
+      assert_raise RuntimeError, fn ->
+        Store.transaction(store, fn ->
+          Store.after_commit(store, notify(:dropped))
+          raise "boom"
+        end)
+      end
+
+      Store.transaction(store, fn -> Store.after_commit(store, notify(:committed)) end)
+
+      assert_received :committed
+      refute_received :dropped
+    end
+
+    test "refuses a transaction it did not open, whose commit it cannot see", %{store: store} do
+      %Store{module: module, config: config} = store
+
+      assert_raise ArgumentError, ~r/Store.transaction\/2/, fn ->
+        module.transaction(config, fn -> Store.after_commit(store, notify(:committed)) end)
+      end
+
+      refute_received :committed
+    end
+
+    test "does not own a transaction opened inside one it did not open", %{store: store} do
+      %Store{module: module, config: config} = store
+
+      assert_raise ArgumentError, ~r/Store.transaction\/2/, fn ->
+        module.transaction(config, fn ->
+          Store.transaction(store, fn -> Store.after_commit(store, notify(:committed)) end)
+        end)
+      end
+    end
+  end
+
+  defp next_queued do
+    receive do
+      message when message in [:first, :second] -> message
+    after
+      0 -> :none
+    end
+  end
+
+  defp notify(message) do
+    test_pid = self()
+    fn -> send(test_pid, message) end
+  end
+
   defp append!(store, type, tags \\ []) do
     Store.append(store, [%Record{type: type, data: %{}, tags: tags}])
   end
@@ -1034,17 +1140,15 @@ defmodule Ariadne.Flow.StoreTest do
         StoredEventReactor.new(%{
           name: name,
           query: query,
-          handler: fn events -> {:ok, length(events)} end
+          handler: fn events -> {:ok, Enum.map(events, & &1.position)} end
         })
       )
   end
 
   defp recording_handler(target_pid, name) do
     fn events ->
-      Enum.reduce_while(events, {:ok, 0}, fn seq, {:ok, count} ->
-        send(target_pid, {:got, name, seq})
-        {:cont, {:ok, count + 1}}
-      end)
+      Enum.each(events, &send(target_pid, {:got, name, &1}))
+      {:ok, Enum.map(events, & &1.position)}
     end
   end
 
