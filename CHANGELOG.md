@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/modell-aachen/flow/compare/v0.11.2...v0.12.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* pass envelope and position to after-run hook ([#57](https://github.com/modell-aachen/flow/issues/57))
+
+### Features
+
+* pass envelope and position to after-run hook ([#57](https://github.com/modell-aachen/flow/issues/57)) ([30f4092](https://github.com/modell-aachen/flow/commit/30f40926c587d052f7eb7d95c55388bbb9e780d0))
+
 ## [0.11.2](https://github.com/modell-aachen/flow/compare/v0.11.1...v0.11.2) (2026-10-28)
 
 
