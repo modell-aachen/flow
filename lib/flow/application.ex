@@ -13,14 +13,15 @@ defmodule Ariadne.Flow.Application do
   alias Ariadne.Flow.Scheduler
   alias Ariadne.Flow.Store
 
-  defstruct [:store, :around_event, reactors: [], scheduler: nil]
+  defstruct [:store, :around_event, :after_reactor_run, reactors: [], scheduler: nil]
 
   def new(%{store: %Store{} = store} = attrs) do
     %__MODULE__{
       store: store,
       reactors: distinctly_named(Map.get(attrs, :reactors, [])),
       scheduler: Scheduler.normalize(Map.get(attrs, :scheduler)),
-      around_event: ReactorRun.around_event!(Map.get(attrs, :around_event))
+      around_event: ReactorRun.around_event!(Map.get(attrs, :around_event)),
+      after_reactor_run: ReactorRun.after_reactor_run!(Map.get(attrs, :after_reactor_run))
     }
   end
 
@@ -129,8 +130,12 @@ defmodule Ariadne.Flow.Application do
 
   defp react(result, _application, _consistency, _nested), do: result
 
-  defp execute(reactor_runs, %__MODULE__{store: store, around_event: around_event}),
-    do: Handoff.execute(reactor_runs, store, around_event: around_event)
+  defp execute(reactor_runs, %__MODULE__{store: store} = application) do
+    Handoff.execute(reactor_runs, store,
+      around_event: application.around_event,
+      after_reactor_run: application.after_reactor_run
+    )
+  end
 
   defp surface(failures, nested) do
     case Enum.filter(failures, &ReactorRun.sync?(&1.run)) do

@@ -20,27 +20,25 @@ defmodule Ariadne.Flow.Store.Consumption do
   def run(batch, prior_position, more_in_store?, handler)
       when is_list(batch) and is_function(handler, 1) do
     case handler.(batch) do
-      {:ok, count} ->
-        new_position = position_after(batch, count, prior_position)
+      {:ok, results} ->
+        consumed(batch, results, prior_position, %{status: :ok, more?: more_in_store?})
 
-        {%ConsumeResult{
-           status: :ok,
-           processed: count,
-           last_position: new_position,
-           more?: more_in_store?
-         }, new_position}
-
-      {:error, count, failure} ->
-        new_position = position_after(batch, count, prior_position)
-
-        {%ConsumeResult{
-           status: :error,
-           processed: count,
-           last_position: new_position,
-           more?: false,
-           failure: failure
-         }, new_position}
+      {:error, results, failure} ->
+        consumed(batch, results, prior_position, %{status: :error, more?: false, failure: failure})
     end
+  end
+
+  defp consumed(batch, results, prior_position, outcome) do
+    processed = length(results)
+    new_position = position_after(batch, processed, prior_position)
+
+    result =
+      struct!(
+        ConsumeResult,
+        Map.merge(outcome, %{processed: processed, results: results, last_position: new_position})
+      )
+
+    {result, new_position}
   end
 
   defp position_after(_batch, 0, prior_position), do: prior_position

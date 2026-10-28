@@ -440,7 +440,7 @@ defmodule Ariadne.Flow.ConsistencyTest do
         StoredEventReactor.new(%{
           name: name,
           query: [%{types: [CountEvent]}],
-          handler: fn _events -> {:ok, 1} end
+          handler: fn [first | _rest] -> {:ok, [first.position]} end
         })
       )
   end

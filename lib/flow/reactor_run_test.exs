@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.ReactorRunTest do
   use ExUnit.Case, async: true
+  import ExUnit.CaptureLog
   alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
@@ -72,6 +73,19 @@ defmodule Ariadne.Flow.ReactorRunTest do
 
     def reactor do
       Reactor.new(%{name: "rejects-zero", filter: %{types: [CountEvent]}}, fn
+        _event, _metadata -> :ok
+      end)
+    end
+  end
+
+  defmodule ResultReactor do
+    alias Ariadne.Flow.Reactor
+    alias Ariadne.Flow.ReactorRunTest.CountEvent
+
+    def reactor do
+      Reactor.new(%{name: "results", filter: %{types: [CountEvent]}}, fn
+        %CountEvent{count: 0}, _metadata -> {:error, :zero_not_allowed}
+        %CountEvent{count: count}, _metadata when rem(count, 2) == 1 -> {:ok, {:odd, count}}
         _event, _metadata -> :ok
       end)
     end
@@ -358,6 +372,98 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert_raise ArgumentError, ~r/:around_event/, fn ->
         ReactorRun.execute(run(CountsReactor), store, around_event: fn -> :ok end)
       end
+    end
+  end
+
+  describe "execute/3 with :after_reactor_run" do
+    test "hands the hook the reactor, its saved checkpoint and each event's result in order" do
+      store = inbox_store()
+      {:ok, %{events: events}} = Store.append(store, Enum.map(1..3, &count_store_event/1))
+      last_position = List.last(events).position
+
+      assert :ok =
+               ReactorRun.execute(run(ResultReactor), store,
+                 after_reactor_run: report_after_run()
+               )
+
+      assert_received {:after_run, ResultReactor, ^last_position, [{:odd, 1}, nil, {:odd, 3}]}
+      refute_received {:after_run, _, _, _}
+    end
+
+    test "calls the hook once per consumed batch with that batch's checkpoint" do
+      store = inbox_store()
+      {:ok, %{events: events}} = Store.append(store, Enum.map(1..101, &count_store_event/1))
+      positions = Enum.map(events, & &1.position)
+
+      assert :ok =
+               ReactorRun.execute(run(ResultReactor), store,
+                 after_reactor_run: report_after_run()
+               )
+
+      first_checkpoint = Enum.at(positions, 99)
+      last_checkpoint = List.last(positions)
+      assert_received {:after_run, ResultReactor, ^first_checkpoint, first_results}
+      assert_received {:after_run, ResultReactor, ^last_checkpoint, [{:odd, 101}]}
+      assert length(first_results) == 100
+    end
+
+    test "does not call the hook when the run processed no event" do
+      store = inbox_store()
+      Store.append(store, [unrelated_store_event()])
+
+      assert :ok =
+               ReactorRun.execute(run(ResultReactor), store,
+                 after_reactor_run: report_after_run()
+               )
+
+      refute_received {:after_run, _, _, _}
+    end
+
+    test "hands the hook the events committed before a failing one" do
+      store = inbox_store()
+
+      {:ok, %{events: [_first, second, _failing, _after]}} =
+        Store.append(store, Enum.map([1, 2, 0, 3], &count_store_event/1))
+
+      second_position = second.position
+
+      assert {:error, %ReactorError{}} =
+               ReactorRun.execute(run(ResultReactor), store,
+                 after_reactor_run: report_after_run()
+               )
+
+      assert_received {:after_run, ResultReactor, ^second_position, [{:odd, 1}, nil]}
+    end
+
+    test "logs a raising hook and leaves the saved checkpoint where it is" do
+      store = inbox_store()
+      {:ok, %{events: events}} = Store.append(store, Enum.map(1..2, &count_store_event/1))
+      raising_hook = fn _reactor_module, _position, _results -> raise "hook broke" end
+
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   ReactorRun.execute(run(ResultReactor), store, after_reactor_run: raising_hook)
+        end)
+
+      assert log =~ "hook broke"
+      assert Store.checkpoint(store, "results") == List.last(events).position
+    end
+
+    test "refuses an after_reactor_run that is not a function of three arguments" do
+      store = inbox_store()
+
+      assert_raise ArgumentError, ~r/:after_reactor_run/, fn ->
+        ReactorRun.execute(run(CountsReactor), store, after_reactor_run: fn _results -> :ok end)
+      end
+    end
+  end
+
+  defp report_after_run do
+    inbox = self()
+
+    fn reactor_module, position, results ->
+      send(inbox, {:after_run, reactor_module, position, results})
     end
   end
 

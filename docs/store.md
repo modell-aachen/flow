@@ -92,6 +92,12 @@ An error *return* is not a rollback. `{:error, reason}` comes back as it is, wit
 
 The transaction also joins an ambient one — its own `transaction/2`, or, with the Postgres store, any transaction on the same repo — rather than committing independently inside it. `Ariadne.Flow.Store.in_transaction?/1` answers whether there is one to join, which is how a caller finds out whether a write it makes now would still be invisible to everybody else. `Application.dispatch/3` asks it to decide whether a synchronous reactor's run can be [scheduled and waited for](application.html#nesting).
 
+### Running something after the commit
+
+`Ariadne.Flow.Store.after_commit/2` runs a zero-arity function once the writes made so far are committed. Outside a transaction that is now. Inside one opened with `transaction/2`, the function is queued and run when the *outermost* `transaction/2` commits — after it returns from the backend, in the order the functions were queued — and dropped when that transaction rolls back or raises. This is what defers a reactor's [`:after_reactor_run`](application.html#learning-what-a-run-committed) call past a caller's transaction.
+
+Only a transaction `transaction/2` opened can be followed to its commit. Ecto has no after-commit callback, and a repo transaction whose function returned can still roll back — an inner `Repo.rollback` marks the outer one, and an error return is not distinguishable from a rollback in what `Repo.transaction` hands back. So `after_commit/2` inside a transaction Flow did not open, a bare `Repo.transaction` above all, raises `ArgumentError`, and so does it inside a `transaction/2` nested in such a one, which owns nothing: open the outer transaction with `transaction/2` instead.
+
 `Application.dispatch/3` wraps every dispatch in `transaction/2`, and what goes inside it is exactly what has to commit with the events: the append itself, the reactor checkpoints the append initialises, and whatever the [scheduler](application.html#the-scheduler) durably schedules. Reactors run *after* that transaction commits, so no reactor can undo a dispatch and none of them holds the append lock while it works.
 
 ## Backends

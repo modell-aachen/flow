@@ -91,6 +91,24 @@ defmodule Ariadne.Flow.PostgresStoreTest do
     end
   end
 
+  describe "after_commit/2" do
+    test "drops the queued function when an inner transaction rolled back", %{store: store} do
+      test_pid = self()
+
+      assert {:error, :rollback} =
+               Store.transaction(store, fn ->
+                 Store.after_commit(store, fn -> send(test_pid, :committed) end)
+
+                 {:error, :inner_rollback} =
+                   Repo.transaction(fn -> Repo.rollback(:inner_rollback) end)
+
+                 :ok
+               end)
+
+      refute_received :committed
+    end
+  end
+
   # Real connections rather than the sandbox's: the point is two dispatches contending on
   # the store's append lock, which one connection cannot show.
   describe "initializing a checkpoint inside the append's critical section" do
