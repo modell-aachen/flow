@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.2](https://github.com/modell-aachen/flow/compare/v0.11.1...v0.11.2) (2026-10-28)
+
+
+### Features
+
+* reactor handler results and after-run hook ([#54](https://github.com/modell-aachen/flow/issues/54)) ([deabb8d](https://github.com/modell-aachen/flow/commit/deabb8d6477d62826aef169853d6aa5eff2a56f5))
+
+
+### Bug Fixes
+
+* drop after-commit tracking for the run hook ([#56](https://github.com/modell-aachen/flow/issues/56)) ([2968c7a](https://github.com/modell-aachen/flow/commit/2968c7a431ac027bd13ecac0403fceff64913517))
+
 ## [0.11.1](https://github.com/modell-aachen/flow/compare/v0.11.0...v0.11.1) (2026-10-02)
 
 
