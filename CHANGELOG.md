@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/modell-aachen/flow/compare/v0.12.0...v0.12.1) (2026-10-28)
+
+
+### Dependencies
+
+* bump the hex group with 2 updates ([#53](https://github.com/modell-aachen/flow/issues/53)) ([9c733bf](https://github.com/modell-aachen/flow/commit/9c733bfee19c628242ff68c29c5d3be103fe0324))
+
 ## [0.12.0](https://github.com/modell-aachen/flow/compare/v0.11.2...v0.12.0) (2026-10-28)
 
 
