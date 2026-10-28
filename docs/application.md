@@ -213,21 +213,27 @@ Configured on `new/1`, it wraps every event of every run Flow executes itself �
 
 ### Learning what a run committed
 
-A reactor that maintains a read model commits its rows and its checkpoint in one transaction, so the checkpoint is the read model's version: data read together with it contains exactly the events up to it, and it never moves backwards. `:after_reactor_run` is how the application learns that such a transaction committed — to tell the clients rendering the read model to read it again, say. It is a function of the reactor module, the checkpoint the run saved, and the handler results of the events that run committed, in position order:
+A reactor that maintains a read model commits its rows and its checkpoint in one transaction, so the checkpoint is the read model's version: data read together with it contains exactly the events up to it, and it never moves backwards. `:after_reactor_run` is how the application learns that such a transaction committed — to tell the clients rendering the read model to read it again, say. It is a function of the reactor module and a map of the checkpoint the run saved and the events that run committed, in position order — each one's envelope and position next to its handler result:
 
 ```elixir
-after_reactor_run = fn reactor_module, checkpoint, results ->
-  Phoenix.PubSub.broadcast(MyApp.PubSub, "read_models", {reactor_module, checkpoint, results})
+after_reactor_run = fn reactor_module, %{checkpoint: checkpoint, results: results} ->
+  for %{envelope: envelope, position: position, result: result} <- results do
+    Phoenix.PubSub.broadcast(
+      MyApp.PubSub,
+      "read_models:#{envelope.metadata["tenant"]}",
+      {reactor_module, checkpoint, position, result}
+    )
+  end
 end
 
 Ariadne.Flow.Application.new(%{store: store, reactors: [CourseSize], after_reactor_run: after_reactor_run})
 ```
 
-It is called once per consumed batch that committed at least one event, so it always gets the checkpoint that batch saved, and never for a run that processed nothing, whose checkpoint did not move. The results include every committed event — `nil` for those whose handler returned `:ok` — so the hook sees the whole batch and decides for itself what it has no use for. A batch that stopped on a failing event still calls it with the events before the failure, which were committed; the failing event and those after it are not passed.
+It is called once per consumed batch that committed at least one event, so it always gets the checkpoint that batch saved, and never for a run that processed nothing, whose checkpoint did not move. The results include every committed event — `result: nil` for those whose handler returned `:ok` — so the hook sees the whole batch and decides for itself what it has no use for. The envelope is the one the reactor's handler was given, so the hook reads tenant, trace id or anything else from each event's metadata the way a reactor does, and one function serves every tenant, Flow's own runs and a scheduler's worker alike. The argument is a map so that fields can be added to it without changing the arity again. A batch that stopped on a failing event still calls it with the events before the failure, which were committed; the failing event and those after it are not passed.
 
 The call comes **after Flow's consume transaction has returned**, outside it. A run outside any transaction has therefore committed when the hook is called, so a client rereading on the signal never sees the state before it. A run [nested](#nesting) in a transaction the application opened is inside that transaction when the hook is called, and its work commits or rolls back with the application's. Flow does not try to follow that commit: a hook that must only take effect once it lands should do something transactional, such as `pg_notify` or inserting a job row, which the database delivers on commit and discards on rollback.
 
-A hook that raises, exits or throws does not fail the run: the events it reported on are committed and checkpointed, and a failed notification is no reason to fail a dispatch whose work landed or to roll back a caller's transaction. Flow logs the failure and reports it as a `[:ariadne, :flow, :reactor, :after_run_failure]` telemetry event, carrying the reactor module, the checkpoint, the `kind` and the normalised `reason`, so it can be alerted on. Configured on `new/1`, the hook applies to every run Flow executes itself, like `:around_event`, and a scheduler's worker passes it to `Ariadne.Flow.ReactorRun.execute/3`. Anything but `nil` or a three-arity function raises `ArgumentError`.
+A hook that raises, exits or throws does not fail the run: the events it reported on are committed and checkpointed, and a failed notification is no reason to fail a dispatch whose work landed or to roll back a caller's transaction. Flow logs the failure and reports it as a `[:ariadne, :flow, :reactor, :after_run_failure]` telemetry event, carrying the reactor module, the checkpoint, the `kind` and the normalised `reason`, so it can be alerted on. Configured on `new/1`, the hook applies to every run Flow executes itself, like `:around_event`, and a scheduler's worker passes it to `Ariadne.Flow.ReactorRun.execute/3`. Anything but `nil` or a two-arity function raises `ArgumentError`.
 
 ## Synchronous reactors
 

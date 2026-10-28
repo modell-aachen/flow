@@ -376,18 +376,37 @@ defmodule Ariadne.Flow.ReactorRunTest do
   end
 
   describe "execute/3 with :after_reactor_run" do
-    test "hands the hook the reactor, its saved checkpoint and each event's result in order" do
+    test "hands the hook the reactor, its saved checkpoint and each event's envelope, position and result in order" do
       store = inbox_store()
       {:ok, %{events: events}} = Store.append(store, Enum.map(1..3, &count_store_event/1))
-      last_position = List.last(events).position
+      [first, second, third] = Enum.map(events, & &1.position)
 
       assert :ok =
                ReactorRun.execute(run(ResultReactor), store,
                  after_reactor_run: report_after_run()
                )
 
-      assert_received {:after_run, ResultReactor, ^last_position, [{:odd, 1}, nil, {:odd, 3}]}
-      refute_received {:after_run, _, _, _}
+      assert_received {:after_run, ResultReactor, %{checkpoint: ^third, results: results}}
+
+      assert [
+               %{
+                 envelope: %Envelope{event: %CountEvent{count: 1}},
+                 position: ^first,
+                 result: {:odd, 1}
+               },
+               %{
+                 envelope: %Envelope{event: %CountEvent{count: 2}},
+                 position: ^second,
+                 result: nil
+               },
+               %{
+                 envelope: %Envelope{event: %CountEvent{count: 3}},
+                 position: ^third,
+                 result: {:odd, 3}
+               }
+             ] = results
+
+      refute_received {:after_run, _, _}
     end
 
     test "calls the hook once per consumed batch with that batch's checkpoint" do
@@ -402,9 +421,17 @@ defmodule Ariadne.Flow.ReactorRunTest do
 
       first_checkpoint = Enum.at(positions, 99)
       last_checkpoint = List.last(positions)
-      assert_received {:after_run, ResultReactor, ^first_checkpoint, first_results}
-      assert_received {:after_run, ResultReactor, ^last_checkpoint, [{:odd, 101}]}
-      assert length(first_results) == 100
+
+      assert_received {:after_run, ResultReactor,
+                       %{checkpoint: ^first_checkpoint, results: first_results}}
+
+      assert_received {:after_run, ResultReactor,
+                       %{
+                         checkpoint: ^last_checkpoint,
+                         results: [%{position: ^last_checkpoint, result: {:odd, 101}}]
+                       }}
+
+      assert Enum.map(first_results, & &1.position) == Enum.take(positions, 100)
     end
 
     test "does not call the hook when the run processed no event" do
@@ -416,15 +443,16 @@ defmodule Ariadne.Flow.ReactorRunTest do
                  after_reactor_run: report_after_run()
                )
 
-      refute_received {:after_run, _, _, _}
+      refute_received {:after_run, _, _}
     end
 
     test "hands the hook the events committed before a failing one" do
       store = inbox_store()
 
-      {:ok, %{events: [_first, second, _failing, _after]}} =
+      {:ok, %{events: [first, second, _failing, _after]}} =
         Store.append(store, Enum.map([1, 2, 0, 3], &count_store_event/1))
 
+      first_position = first.position
       second_position = second.position
 
       assert {:error, %ReactorError{}} =
@@ -432,14 +460,21 @@ defmodule Ariadne.Flow.ReactorRunTest do
                  after_reactor_run: report_after_run()
                )
 
-      assert_received {:after_run, ResultReactor, ^second_position, [{:odd, 1}, nil]}
+      assert_received {:after_run, ResultReactor,
+                       %{
+                         checkpoint: ^second_position,
+                         results: [
+                           %{position: ^first_position, result: {:odd, 1}},
+                           %{position: ^second_position, result: nil}
+                         ]
+                       }}
     end
 
     test "reports a raising hook and carries on, the batch it reported on checkpointed" do
       store = inbox_store()
       {:ok, %{events: events}} = Store.append(store, Enum.map(1..2, &count_store_event/1))
       last_position = List.last(events).position
-      raising_hook = fn _reactor_module, _position, _results -> raise "hook broke" end
+      raising_hook = fn _reactor_module, _run -> raise "hook broke" end
       attach_after_run_failure()
 
       log =
@@ -461,11 +496,13 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert Store.checkpoint(store, "results") == last_position
     end
 
-    test "refuses an after_reactor_run that is not a function of three arguments" do
+    test "refuses an after_reactor_run that is not a function of two arguments" do
       store = inbox_store()
 
-      assert_raise ArgumentError, ~r/:after_reactor_run/, fn ->
-        ReactorRun.execute(run(CountsReactor), store, after_reactor_run: fn _results -> :ok end)
+      for after_reactor_run <- [fn _run -> :ok end, fn _module, _position, _results -> :ok end] do
+        assert_raise ArgumentError, ~r/:after_reactor_run/, fn ->
+          ReactorRun.execute(run(CountsReactor), store, after_reactor_run: after_reactor_run)
+        end
       end
     end
   end
@@ -490,9 +527,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
   defp report_after_run do
     inbox = self()
 
-    fn reactor_module, position, results ->
-      send(inbox, {:after_run, reactor_module, position, results})
-    end
+    fn reactor_module, run -> send(inbox, {:after_run, reactor_module, run}) end
   end
 
   defp scope_from_trace_id(%Envelope{metadata: metadata}, handle) do
