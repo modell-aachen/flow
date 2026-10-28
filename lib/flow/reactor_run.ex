@@ -6,7 +6,6 @@ defmodule Ariadne.Flow.ReactorRun do
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.StoredEventReactor
-  require Logger
 
   @enforce_keys [:reactor]
   defstruct [:reactor, metadata: %{}]
@@ -36,7 +35,7 @@ defmodule Ariadne.Flow.ReactorRun do
   def execute(%__MODULE__{reactor: reactor_module}, %Store{} = store, opts \\ []) do
     reactor = reactor_module.reactor()
     around_event = around_event!(Keyword.get(opts, :around_event))
-    after_run = after_run(reactor_module, Keyword.get(opts, :after_reactor_run), store)
+    after_run = after_run(reactor_module, Keyword.get(opts, :after_reactor_run))
 
     stored_event_reactor =
       StoredEventReactor.new(%{
@@ -62,34 +61,17 @@ defmodule Ariadne.Flow.ReactorRun do
   def after_reactor_run!(after_reactor_run),
     do: raise(ArgumentError, @after_reactor_run_hint <> inspect(after_reactor_run))
 
-  defp after_run(reactor_module, after_reactor_run, store) do
+  defp after_run(reactor_module, after_reactor_run) do
     case after_reactor_run!(after_reactor_run) do
-      nil ->
-        fn _consume_result -> :ok end
-
-      hook ->
-        Store.ensure_after_commit!(store)
-        &report_run(store, reactor_module, hook, &1)
+      nil -> fn _consume_result -> :ok end
+      hook -> &report_run(reactor_module, hook, &1)
     end
   end
 
-  defp report_run(_store, _reactor_module, _hook, %ConsumeResult{processed: 0}), do: :ok
+  defp report_run(_reactor_module, _hook, %ConsumeResult{processed: 0}), do: :ok
 
-  defp report_run(store, reactor_module, hook, %ConsumeResult{} = result) do
-    Store.after_commit(store, fn ->
-      call_hook(hook, reactor_module, result.last_position, result.results)
-    end)
-  end
-
-  defp call_hook(hook, reactor_module, position, results) do
-    hook.(reactor_module, position, results)
-  catch
-    kind, value ->
-      Logger.error(fn ->
-        "[ariadne.flow] after_reactor_run for #{inspect(reactor_module)} at position " <>
-          "#{position} failed: #{Exception.format(kind, value, __STACKTRACE__)}"
-      end)
-  end
+  defp report_run(reactor_module, hook, %ConsumeResult{last_position: position, results: results}),
+       do: hook.(reactor_module, position, results)
 
   defp catch_up(store, %StoredEventReactor{name: name} = stored_event_reactor, after_run) do
     result = Store.consume(store, stored_event_reactor)

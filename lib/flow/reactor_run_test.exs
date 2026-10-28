@@ -1,6 +1,5 @@
 defmodule Ariadne.Flow.ReactorRunTest do
   use ExUnit.Case, async: true
-  import ExUnit.CaptureLog
   alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
@@ -435,18 +434,15 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert_received {:after_run, ResultReactor, ^second_position, [{:odd, 1}, nil]}
     end
 
-    test "logs a raising hook and leaves the saved checkpoint where it is" do
+    test "lets a raising hook propagate, the batch it reported on already checkpointed" do
       store = inbox_store()
       {:ok, %{events: events}} = Store.append(store, Enum.map(1..2, &count_store_event/1))
       raising_hook = fn _reactor_module, _position, _results -> raise "hook broke" end
 
-      log =
-        capture_log(fn ->
-          assert :ok =
-                   ReactorRun.execute(run(ResultReactor), store, after_reactor_run: raising_hook)
-        end)
+      assert_raise RuntimeError, "hook broke", fn ->
+        ReactorRun.execute(run(ResultReactor), store, after_reactor_run: raising_hook)
+      end
 
-      assert log =~ "hook broke"
       assert Store.checkpoint(store, "results") == List.last(events).position
     end
 
