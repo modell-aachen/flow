@@ -998,7 +998,7 @@ defmodule Ariadne.Flow.ApplicationTest do
       assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
     end
 
-    test "reports a raising hook as a failure of the reactor it reported on" do
+    test "does not fail the dispatch over a raising hook, the reactor's work committed" do
       store = inbox_store()
 
       application =
@@ -1008,9 +1008,10 @@ defmodule Ariadne.Flow.ApplicationTest do
           after_reactor_run: fn _reactor_module, _position, _results -> raise "hook broke" end
         })
 
-      assert_raise PostCommitError, ~r/sync reactor "sync-counts" failed: hook broke/, fn ->
-        Application.dispatch(application, count_command(1))
-      end
+      assert {:ok, %{events: [%{metadata: %{position: position}}]}} =
+               Application.dispatch(application, count_command(1))
+
+      assert Store.checkpoint(store, "sync-counts") == position
     end
 
     test "calls the hook of a nested run inside the caller's transaction" do

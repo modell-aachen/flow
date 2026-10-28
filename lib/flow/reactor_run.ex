@@ -6,6 +6,7 @@ defmodule Ariadne.Flow.ReactorRun do
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.Store
   alias Ariadne.Flow.Store.StoredEventReactor
+  require Logger
 
   @enforce_keys [:reactor]
   defstruct [:reactor, metadata: %{}]
@@ -70,8 +71,30 @@ defmodule Ariadne.Flow.ReactorRun do
 
   defp report_run(_reactor_module, _hook, %ConsumeResult{processed: 0}), do: :ok
 
-  defp report_run(reactor_module, hook, %ConsumeResult{last_position: position, results: results}),
-       do: hook.(reactor_module, position, results)
+  defp report_run(reactor_module, hook, %ConsumeResult{last_position: position, results: results}) do
+    hook.(reactor_module, position, results)
+  catch
+    kind, value -> report_hook_failure(reactor_module, position, kind, value, __STACKTRACE__)
+  end
+
+  defp report_hook_failure(reactor_module, position, kind, value, stacktrace) do
+    :telemetry.execute(
+      [:ariadne, :flow, :reactor, :after_run_failure],
+      %{system_time: System.system_time()},
+      %{
+        reactor: reactor_module,
+        position: position,
+        kind: kind,
+        reason: Exception.normalize(kind, value, stacktrace)
+      }
+    )
+
+    Logger.error(fn ->
+      "[ariadne.flow] after_reactor_run for #{inspect(reactor_module)} at position " <>
+        "#{position} failed: #{Exception.format(kind, value, stacktrace)}\n" <>
+        "The run's events are committed and stay checkpointed."
+    end)
+  end
 
   defp catch_up(store, %StoredEventReactor{name: name} = stored_event_reactor, after_run) do
     result = Store.consume(store, stored_event_reactor)

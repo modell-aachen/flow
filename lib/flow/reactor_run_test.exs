@@ -1,5 +1,6 @@
 defmodule Ariadne.Flow.ReactorRunTest do
   use ExUnit.Case, async: true
+  import ExUnit.CaptureLog
   alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
@@ -434,16 +435,30 @@ defmodule Ariadne.Flow.ReactorRunTest do
       assert_received {:after_run, ResultReactor, ^second_position, [{:odd, 1}, nil]}
     end
 
-    test "lets a raising hook propagate, the batch it reported on already checkpointed" do
+    test "reports a raising hook and carries on, the batch it reported on checkpointed" do
       store = inbox_store()
       {:ok, %{events: events}} = Store.append(store, Enum.map(1..2, &count_store_event/1))
+      last_position = List.last(events).position
       raising_hook = fn _reactor_module, _position, _results -> raise "hook broke" end
+      attach_after_run_failure()
 
-      assert_raise RuntimeError, "hook broke", fn ->
-        ReactorRun.execute(run(ResultReactor), store, after_reactor_run: raising_hook)
-      end
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   ReactorRun.execute(run(ResultReactor), store, after_reactor_run: raising_hook)
+        end)
 
-      assert Store.checkpoint(store, "results") == List.last(events).position
+      assert log =~ "hook broke"
+
+      assert_received {:after_run_failure, %{system_time: _},
+                       %{
+                         reactor: ResultReactor,
+                         position: ^last_position,
+                         kind: :error,
+                         reason: %RuntimeError{message: "hook broke"}
+                       }}
+
+      assert Store.checkpoint(store, "results") == last_position
     end
 
     test "refuses an after_reactor_run that is not a function of three arguments" do
@@ -453,6 +468,23 @@ defmodule Ariadne.Flow.ReactorRunTest do
         ReactorRun.execute(run(CountsReactor), store, after_reactor_run: fn _results -> :ok end)
       end
     end
+  end
+
+  defp attach_after_run_failure do
+    handler = "after-run-failure-test-#{inspect(self())}"
+    test_pid = self()
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:ariadne, :flow, :reactor, :after_run_failure],
+        fn _event, measurements, metadata, _ ->
+          send(test_pid, {:after_run_failure, measurements, metadata})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
   end
 
   defp report_after_run do
