@@ -368,12 +368,11 @@ defmodule Ariadne.Flow.ApplicationTest do
       end
     end
 
-    test "refuses an after_reactor_run that is not a function of three arguments" do
-      assert_raise ArgumentError, ~r/:after_reactor_run/, fn ->
-        Application.new(%{
-          store: Store.InMemory.init(),
-          after_reactor_run: fn _results -> :ok end
-        })
+    test "refuses an after_reactor_run that is not a function of two arguments" do
+      for after_reactor_run <- [fn _run -> :ok end, fn _module, _position, _results -> :ok end] do
+        assert_raise ArgumentError, ~r/:after_reactor_run/, fn ->
+          Application.new(%{store: Store.InMemory.init(), after_reactor_run: after_reactor_run})
+        end
       end
     end
   end
@@ -989,28 +988,43 @@ defmodule Ariadne.Flow.ApplicationTest do
   end
 
   describe "dispatch/3 with an after_reactor_run hook" do
-    test "calls the hook with the reactor's saved checkpoint once its run committed" do
+    test "calls the hook with the reactor's saved checkpoint and committed events once its run committed" do
       store = inbox_store()
 
       assert {:ok, %{events: [%{metadata: %{position: position}}]}} =
                Application.dispatch(reporting_application(store), count_command(1))
 
-      assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
+      assert_received {:after_run, SyncCountsReactor,
+                       %{
+                         checkpoint: ^position,
+                         results: [
+                           %{
+                             envelope: %Envelope{event: %CountEvent{count: 1}},
+                             position: ^position,
+                             result: nil
+                           }
+                         ]
+                       }}
     end
 
     test "does not fail the dispatch over a raising hook, the reactor's work committed" do
       store = inbox_store()
+      inbox = self()
 
       application =
         Application.new(%{
           store: store,
           reactors: [SyncCountsReactor],
-          after_reactor_run: fn _reactor_module, _position, _results -> raise "hook broke" end
+          after_reactor_run: fn reactor_module, run ->
+            send(inbox, {:after_run, reactor_module, run})
+            raise "hook broke"
+          end
         })
 
       assert {:ok, %{events: [%{metadata: %{position: position}}]}} =
                Application.dispatch(application, count_command(1))
 
+      assert_received {:after_run, SyncCountsReactor, %{checkpoint: ^position}}
       assert Store.checkpoint(store, "sync-counts") == position
     end
 
@@ -1021,7 +1035,8 @@ defmodule Ariadne.Flow.ApplicationTest do
         {:ok, %{events: [%{metadata: %{position: position}}]}} =
           Application.dispatch(reporting_application(store), count_command(1))
 
-        assert_received {:after_run, SyncCountsReactor, ^position, [nil]}
+        assert_received {:after_run, SyncCountsReactor,
+                         %{checkpoint: ^position, results: [%{position: ^position}]}}
       end)
     end
   end
@@ -1032,8 +1047,8 @@ defmodule Ariadne.Flow.ApplicationTest do
     Application.new(%{
       store: store,
       reactors: [SyncCountsReactor],
-      after_reactor_run: fn reactor_module, position, results ->
-        send(inbox, {:after_run, reactor_module, position, results})
+      after_reactor_run: fn reactor_module, run ->
+        send(inbox, {:after_run, reactor_module, run})
       end
     })
   end

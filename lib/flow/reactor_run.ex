@@ -12,7 +12,7 @@ defmodule Ariadne.Flow.ReactorRun do
   defstruct [:reactor, metadata: %{}]
 
   @around_event_hint ":around_event must be a function of the event's envelope and a zero-arity function handling it, got: "
-  @after_reactor_run_hint ":after_reactor_run must be a function of the reactor module, the checkpoint its run saved and the results of the events it committed, got: "
+  @after_reactor_run_hint ":after_reactor_run must be a function of the reactor module and a map of the checkpoint its run saved and the results of the events it committed, got: "
 
   def new(%{reactor: reactor_module} = attrs) do
     %__MODULE__{reactor: reactor_module, metadata: Map.get(attrs, :metadata, %{})}
@@ -56,7 +56,7 @@ defmodule Ariadne.Flow.ReactorRun do
 
   def after_reactor_run!(nil), do: nil
 
-  def after_reactor_run!(after_reactor_run) when is_function(after_reactor_run, 3),
+  def after_reactor_run!(after_reactor_run) when is_function(after_reactor_run, 2),
     do: after_reactor_run
 
   def after_reactor_run!(after_reactor_run),
@@ -72,7 +72,7 @@ defmodule Ariadne.Flow.ReactorRun do
   defp report_run(_reactor_module, _hook, %ConsumeResult{processed: 0}), do: :ok
 
   defp report_run(reactor_module, hook, %ConsumeResult{last_position: position, results: results}) do
-    hook.(reactor_module, position, results)
+    hook.(reactor_module, %{checkpoint: position, results: results})
   catch
     kind, value -> report_hook_failure(reactor_module, position, kind, value, __STACKTRACE__)
   end
@@ -117,12 +117,14 @@ defmodule Ariadne.Flow.ReactorRun do
   defp run_handler(reactor, events, around_event) do
     events
     |> Enum.reduce_while({:ok, []}, fn seq, {:ok, results} ->
-      case handle(reactor, seq, around_event) do
+      envelope = Codec.deserialize(seq)
+
+      case handle(reactor, envelope, around_event) do
         :ok ->
-          {:cont, {:ok, [nil | results]}}
+          {:cont, {:ok, [committed(envelope, seq, nil) | results]}}
 
         {:ok, result} ->
-          {:cont, {:ok, [result | results]}}
+          {:cont, {:ok, [committed(envelope, seq, result) | results]}}
 
         {:error, reason} ->
           {:halt, {:error, results, %{event: seq, reason: reason}}}
@@ -136,9 +138,10 @@ defmodule Ariadne.Flow.ReactorRun do
   defp in_position_order({:error, results, failure}),
     do: {:error, Enum.reverse(results), failure}
 
-  defp handle(reactor, seq, around_event) do
-    envelope = Codec.deserialize(seq)
+  defp committed(envelope, seq, result),
+    do: %{envelope: envelope, position: seq.position, result: result}
 
+  defp handle(reactor, envelope, around_event) do
     around_event.(envelope, fn -> Reactor.handle(reactor, envelope) end)
   end
 end
