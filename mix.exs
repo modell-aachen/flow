@@ -78,7 +78,7 @@ defmodule AriadneFlow.MixProject do
       {:telemetry, "~> 1.0"},
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
-      {:mix_test_interactive, "~> 5.0", only: [:dev, :test], runtime: false},
+      {:mix_test_interactive, "~> 6.0", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false}
     ]
   end
