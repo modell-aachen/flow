@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/modell-aachen/flow/compare/v0.12.1...v0.12.2) (2026-10-30)
+
+
+### Dependencies
+
+* bump mix_test_interactive from 5.2.0 to 6.0.0 in the hex group ([#60](https://github.com/modell-aachen/flow/issues/60)) ([768a663](https://github.com/modell-aachen/flow/commit/768a663bfbcab3675955b05f423f55ed75c4f437))
+
 ## [0.12.1](https://github.com/modell-aachen/flow/compare/v0.12.0...v0.12.1) (2026-10-28)
 
 
