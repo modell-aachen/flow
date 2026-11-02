@@ -78,6 +78,27 @@ end
 
 Use `ok` and `err` whenever the reducer returns a tagged tuple — commands are the typical case, since their `mapper` returns `{:ok, events}` or `{:error, reason}`.
 
+## Testing a reactor
+
+With a reactor as `when`, `ok` hands each given event to the reactor's handler, the way a run does with the events it reads, and asserts every handler answered `:ok` or `{:ok, result}`. A `then` of arity 1 receives `%{results: results}`, in the shape the [after-run hook](application.md#learning-what-a-run-committed) gets: one `%{envelope: envelope, position: position, result: result}` per event the reactor handled, in position order, with `result: nil` for a handler that returned `:ok`:
+
+```elixir
+gwt "course_size_reactor" do
+  ok("signals the course whose size changed",
+    given: [
+      %CourseDefined{course_id: 42, capacity: 30},
+      %StudentSubscribedToCourse{course_id: 42, student_id: 7}
+    ],
+    when: course_size_reactor(),
+    then: fn %{results: results} ->
+      assert [%{position: 2, result: {:course_size_changed, 42}}] = results
+    end
+  )
+end
+```
+
+Events outside the reactor's filter are left out of `results`, as a run never reads them; the positions of the remaining ones stay those of the given order, which is how the results of several events are told apart. A `then` of arity 0 is called with nothing, for a test that only checks a side effect.
+
 ## Supplying metadata
 
 When a reducer's handler reads from the `metadata` argument, the test needs to control what metadata each event carries. `given` accepts two forms for this:

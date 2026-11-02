@@ -38,11 +38,16 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
   end
 
   def run_ok(%Reactor{} = reactor, given, expected) do
-    for entry <- given do
-      assert :ok == Reactor.handle(reactor, entry)
-    end
+    results =
+      for entry <- given, Reactor.matches?(reactor, entry) do
+        %{
+          envelope: entry,
+          position: Map.get(entry.metadata, :position),
+          result: handled!(reactor, entry)
+        }
+      end
 
-    maybe_call(expected)
+    maybe_call(expected, %{results: results})
   end
 
   def run_ok(%module{} = reducer, given, expected) do
@@ -80,8 +85,22 @@ defmodule Ariadne.Flow.Test.Gwt.Helpers do
   def assert_res(result, expected) when is_function(expected, 1), do: expected.(result)
   def assert_res(result, expected), do: assert(expected == result)
 
-  def maybe_call(fun) when is_function(fun, 0), do: fun.()
-  def maybe_call(_), do: :ok
+  def maybe_call(fun, _run) when is_function(fun, 0), do: fun.()
+  def maybe_call(fun, run) when is_function(fun, 1), do: fun.(run)
+  def maybe_call(_, _run), do: :ok
+
+  defp handled!(reactor, entry) do
+    case Reactor.handle(reactor, entry) do
+      :ok ->
+        nil
+
+      {:ok, result} ->
+        result
+
+      other ->
+        flunk("expected the reactor to return :ok or {:ok, result}, got: #{inspect(other)}")
+    end
+  end
 
   defp extract_test_cases(maybe_block) do
     case maybe_block do
