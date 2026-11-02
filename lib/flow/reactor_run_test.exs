@@ -5,6 +5,7 @@ defmodule Ariadne.Flow.ReactorRunTest do
   alias Ariadne.Flow.ReactorError
   alias Ariadne.Flow.ReactorRun
   alias Ariadne.Flow.Store
+  alias Ariadne.Flow.Test.Gwt.Helpers
 
   defmodule CountEvent do
     @derive Ariadne.Flow.Event
@@ -409,6 +410,34 @@ defmodule Ariadne.Flow.ReactorRunTest do
       refute_received {:after_run, _, _}
     end
 
+    test "hands the hook the same results Gwt hands an ok case's then" do
+      store = inbox_store()
+
+      Store.append(store, [
+        count_store_event(1),
+        unrelated_store_event(),
+        count_store_event(2),
+        count_store_event(3)
+      ])
+
+      ReactorRun.execute(run(ResultReactor), store, after_reactor_run: report_after_run())
+      assert_received {:after_run, ResultReactor, %{results: run_results}}
+
+      Helpers.run_ok(
+        ResultReactor.reactor(),
+        Helpers.given([
+          %CountEvent{count: 1},
+          %UnrelatedEvent{},
+          %CountEvent{count: 2},
+          %CountEvent{count: 3}
+        ]),
+        fn %{results: gwt_results} -> send(self(), {:gwt_results, gwt_results}) end
+      )
+
+      assert_received {:gwt_results, gwt_results}
+      assert event_results(gwt_results) == event_results(run_results)
+    end
+
     test "calls the hook once per consumed batch with that batch's checkpoint" do
       store = inbox_store()
       {:ok, %{events: events}} = Store.append(store, Enum.map(1..101, &count_store_event/1))
@@ -529,6 +558,9 @@ defmodule Ariadne.Flow.ReactorRunTest do
 
     fn reactor_module, run -> send(inbox, {:after_run, reactor_module, run}) end
   end
+
+  defp event_results(results),
+    do: Enum.map(results, &{&1.envelope.event, &1.result})
 
   defp scope_from_trace_id(%Envelope{metadata: metadata}, handle) do
     Process.put(:event_scope, metadata["trace_id"])

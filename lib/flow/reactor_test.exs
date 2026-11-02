@@ -1,7 +1,9 @@
 defmodule Ariadne.Flow.ReactorTest do
   use Ariadne.Flow.Test.Gwt, async: true
+  alias Ariadne.Flow.Envelope
   alias Ariadne.Flow.Filter
   alias Ariadne.Flow.Reactor
+  alias Ariadne.Flow.Test.Gwt.Helpers
 
   defmodule ExampleEvent do
     @derive Ariadne.Flow.Event
@@ -34,6 +36,10 @@ defmodule Ariadne.Flow.ReactorTest do
     end)
   end
 
+  defp tagging_reactor do
+    build_reactor(fn %ExampleEvent{id: id}, _metadata -> {:ok, {:seen, id}} end)
+  end
+
   gwt "echo reactor" do
     ok("forwards a single event to the test process",
       given: [%ExampleEvent{id: 1}],
@@ -55,6 +61,71 @@ defmodule Ariadne.Flow.ReactorTest do
       when: echo_reactor(),
       then: :zero_not_allowed
     )
+  end
+
+  gwt "results handed to then" do
+    ok("carries a handler's result with the event's envelope and position",
+      given: [%ExampleEvent{id: 1}],
+      when: tagging_reactor(),
+      then: fn %{results: results} ->
+        assert [
+                 %{
+                   envelope: %Envelope{event: %ExampleEvent{id: 1}},
+                   position: 1,
+                   result: {:seen, 1}
+                 }
+               ] = results
+      end
+    )
+
+    ok("keeps each event's result apart, in position order",
+      given: [%ExampleEvent{id: 1}, %ExampleEvent{id: 2}],
+      when: tagging_reactor(),
+      then: fn %{results: results} ->
+        assert [
+                 %{position: 1, result: {:seen, 1}},
+                 %{position: 2, result: {:seen, 2}}
+               ] = results
+      end
+    )
+
+    ok("reports nil for a handler that answered :ok",
+      given: [%ExampleEvent{id: 1}],
+      when: build_reactor(fn _, _ -> :ok end),
+      then: fn %{results: results} ->
+        assert [%{position: 1, result: nil}] = results
+      end
+    )
+
+    ok("leaves out events the filter does not match",
+      given: [%ExampleEvent{id: 1}, %UnrelatedEvent{}, %ExampleEvent{id: 3}],
+      when: tagging_reactor(),
+      then: fn %{results: results} ->
+        assert [
+                 %{position: 1, result: {:seen, 1}},
+                 %{position: 3, result: {:seen, 3}}
+               ] = results
+      end
+    )
+  end
+
+  test "an ok case still calls a then of arity 0 when the handler returns a result" do
+    Helpers.run_ok(tagging_reactor(), given([%ExampleEvent{id: 1}]), fn ->
+      send(self(), :then_called)
+    end)
+
+    assert_received :then_called
+  end
+
+  test "an ok case reports no position for a hand-built envelope that carries none" do
+    [%Envelope{} = numbered] = given([%ExampleEvent{id: 1}])
+    unnumbered = %Envelope{numbered | metadata: %{}}
+
+    Helpers.run_ok(tagging_reactor(), given([unnumbered]), fn %{results: results} ->
+      send(self(), {:results, results})
+    end)
+
+    assert_received {:results, [%{position: nil, result: {:seen, 1}}]}
   end
 
   test "handle/2 returns the user function's result" do
