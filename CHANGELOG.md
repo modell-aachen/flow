@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/modell-aachen/flow/compare/v0.12.2...v0.12.3) (2026-11-25)
+
+
+### Bug Fixes
+
+* read any number of filters from the Postgres store ([#65](https://github.com/modell-aachen/flow/issues/65)) ([43305b5](https://github.com/modell-aachen/flow/commit/43305b5eb8f57f740263ca00c1fef2869c197dbf))
+
 ## [0.12.2](https://github.com/modell-aachen/flow/compare/v0.12.1...v0.12.2) (2026-11-02)
 
 
