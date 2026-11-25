@@ -356,6 +356,29 @@ defmodule Ariadne.Flow.StoreTest do
                Store.read(store, [%{types: ["ItemAdded"]}], limit: 1)
     end
 
+    test "reads a hundred filters, returning each matching event once in position order",
+         %{store: store} do
+      single_tag = append_position!(store, "SeatTaken", ["seat:1"])
+      append!(store, "SeatTaken", ["seat:unrelated"])
+      both_shapes = append_position!(store, "SeatTaken", ["seat:50", "person:51", "role:51"])
+      two_tags = append_position!(store, "SeatTaken", ["person:100", "role:100"])
+      append!(store, "SeatTaken", ["person:99"])
+
+      assert length(Query.new(hundred_filters()).filters) == 100
+
+      assert %{events: events} = Store.read(store, hundred_filters())
+      assert Enum.map(events, & &1.position) == [single_tag, both_shapes, two_tags]
+    end
+
+    test "checks an append condition holding a hundred filters", %{store: store} do
+      append!(store, "SeatTaken", ["seat:unrelated"])
+      condition = %{fail_if_events_match: hundred_filters()}
+      seat = %Record{type: "SeatTaken", data: %{}, tags: ["person:100", "role:100"]}
+
+      assert {:ok, _} = Store.append(store, seat, condition: condition)
+      assert {:error, :append_condition_failed} == Store.append(store, seat, condition: condition)
+    end
+
     test "appends events with an append condition", %{store: store} do
       {:ok, %{events: [%SequencedRecord{position: position, created_at: created_at}]}} =
         result =
@@ -1035,6 +1058,11 @@ defmodule Ariadne.Flow.StoreTest do
   defp append_position!(store, type, tags \\ []) do
     {:ok, %{events: [%SequencedRecord{position: position}]}} = append!(store, type, tags)
     position
+  end
+
+  defp hundred_filters do
+    Enum.map(1..50, &%{types: ["SeatTaken"], tags: ["seat:#{&1}"]}) ++
+      Enum.map(51..100, &%{types: ["SeatTaken"], tags: ["person:#{&1}", "role:#{&1}"]})
   end
 
   defp consume!(store, name, query) do
