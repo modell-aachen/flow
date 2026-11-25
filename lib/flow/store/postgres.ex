@@ -331,11 +331,7 @@ defmodule Ariadne.Flow.Store.Postgres do
 
   defp combine_with_union([first_query | rest_queries]) do
     rest_queries
-    |> Enum.reduce(first_query, fn query, acc ->
-      acc
-      |> subquery()
-      |> union(^query)
-    end)
+    |> Enum.reduce(first_query, &union(&2, ^&1))
     |> subquery()
     |> order_by([e], e.position)
   end
