@@ -4,6 +4,7 @@ defmodule Ariadne.Flow.Event.Type do
 
   @index {__MODULE__, :index}
 
+  # sobelow_skip ["DOS.ModuleConcat"]
   def of(module) when is_atom(module) do
     impl = Module.concat(Event, module)
 

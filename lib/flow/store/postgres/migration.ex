@@ -91,7 +91,7 @@ defmodule Ariadne.Flow.Store.Postgres.Migration do
   end
 
   defp version_module(version) do
-    Module.concat(__MODULE__, "V" <> String.pad_leading(to_string(version), 2, "0"))
+    Module.safe_concat(__MODULE__, "V" <> String.pad_leading(to_string(version), 2, "0"))
   end
 
   defp installed_version(prefix), do: stamped_version(prefix) || shape_floor(prefix)
