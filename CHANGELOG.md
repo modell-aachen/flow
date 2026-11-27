@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.4](https://github.com/modell-aachen/flow/compare/v0.12.3...v0.12.4) (2026-11-27)
+
+
+### Bug Fixes
+
+* clear sobelow 0.19 DOS.ModuleConcat findings ([#68](https://github.com/modell-aachen/flow/issues/68)) ([3d60118](https://github.com/modell-aachen/flow/commit/3d6011856e7ff624ae35b519b87883683b496d7b))
+
+
+### Dependencies
+
+* bump the hex group across 1 directory with 4 updates ([#67](https://github.com/modell-aachen/flow/issues/67)) ([dd9b7e1](https://github.com/modell-aachen/flow/commit/dd9b7e148122ea2f1df446a6cce36680b19a5c23))
+
 ## [0.12.3](https://github.com/modell-aachen/flow/compare/v0.12.2...v0.12.3) (2026-11-25)
 
 
